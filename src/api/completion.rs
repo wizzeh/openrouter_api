@@ -22,7 +22,7 @@ impl CompletionApi {
     /// Calls the completions endpoint. The request payload includes at minimum the `model` and `prompt` fields,
     /// along with any additional generation parameters (temperature, top_p, and so on).
     pub async fn text_completion(&self, request: CompletionRequest) -> Result<CompletionResponse> {
-        // Build the URL to join the base_url for completions.
+        // Build the URL.
         let url = self
             .config
             .base_url
@@ -33,6 +33,7 @@ impl CompletionApi {
                 metadata: None,
             })?;
 
+        // Send the POST request.
         let response = self
             .client
             .post(url)
@@ -41,26 +42,32 @@ impl CompletionApi {
             .send()
             .await?;
 
-        // Check the response status; if it's an error, create our custom Error.
-        if !response.status().is_success() {
+        // Capture the status code before consuming the response body.
+        let status = response.status();
+
+        // Get the response body.
+        let body = response.text().await?;
+
+        // Check if the HTTP response was successful.
+        if !status.is_success() {
             return Err(Error::ApiError {
-                code: response.status().as_u16(),
-                message: response.text().await?,
+                code: status.as_u16(),
+                message: body.clone(),
                 metadata: None,
             });
         }
 
-        let body = response.text().await?;
         if body.trim().is_empty() {
             return Err(Error::ApiError {
-                code: response.status().as_u16(),
+                code: status.as_u16(),
                 message: "Empty response body".into(),
                 metadata: None,
             });
         }
 
+        // Deserialize the body.
         serde_json::from_str::<CompletionResponse>(&body).map_err(|e| Error::ApiError {
-            code: response.status().as_u16(),
+            code: status.as_u16(),
             message: format!("Failed to decode JSON: {}. Body was: {}", e, body),
             metadata: None,
         })
