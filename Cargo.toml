@@ -1,0 +1,56 @@
+[package]
+name = "openrouter_api"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <jamesr@ideasx.com>"]
+description = "A Rust client library for the OpenRouter API"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/socrates8300/openrouter_api"
+documentation = "https://docs.rs/openrouter_api"
+readme = "README.md"
+keywords = ["openrouter", "ai", "api-client"]
+categories = ["api-bindings", "asynchronous"]
+
+[dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async Runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# HTTP Client
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "1.0"
+
+# URL handling
+url = "2.5"
+
+# Logging
+tracing = "0.1"
+
+[dev-dependencies]
+tokio-test = "0.4"
+wiremock = "0.5"
+test-case = "3.3"
+
+[features]
+default = ["rustls"]
+rustls = ["reqwest/rustls-tls"]
+native-tls = ["reqwest/native-tls"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "unwind"
+strip = true
