@@ -135,6 +135,36 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    async fn test_text_completion_response_deserialization(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Simulated response JSON from the text completion endpoint.
+        let simulated_response_json = r#"
+        {
+            "id": "comp-123",
+            "choices": [
+                {
+                    "text": "Once upon a time, in a land far, far away...",
+                    "index": 0,
+                    "finish_reason": "stop"
+                }
+            ]
+        }
+        "#;
+
+        // Deserialize the response.
+        let response = serde_json::from_str::<crate::types::completion::CompletionResponse>(
+            simulated_response_json,
+        )?;
+
+        // Verify that the deserialization worked correctly.
+        assert!(response.choices.len() > 0);
+        assert_eq!(response.choices[0].finish_reason.as_deref(), Some("stop"));
+        assert!(response.choices[0].text.contains("Once upon a time"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_invalid_tool_call_response() -> Result<(), Box<dyn std::error::Error>> {
         // Simulate an invalid ChatCompletionResponse where the tool call kind is not "function".
         let simulated_response_json = r#"

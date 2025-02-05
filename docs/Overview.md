@@ -29,7 +29,8 @@ openrouter_api/
 │   │   ├── provider.rs        # Provider-related types (stub)
 │   │   ├── routing.rs         # Routing preference types (stub)
 │   │   ├── transform.rs       # Message transform types (stub)
-│   │   └── web_search.rs      # Web search request and response types (new)
+│   │   ├── web_search.rs      # Web search request and response types (new)
+│   │   └── completion.rs      # Text completion request/response types
 │   └── utils/                 # Utility functions
 │       ├── mod.rs             # Exports for utilities
 │       ├── http.rs            # HTTP-related utility functions
@@ -58,9 +59,9 @@ openrouter_api/
 ## Key Design Considerations
 
 1. **Modular Organization:**
-   - **Models:** Contains data structures and types for API request/response schemas. The `ProviderPreferences` and `WebSearch` modules have been added to provide enhanced type‑safety for routing options and web search queries.
-   - **API Modules:** Each endpoint (chat, completions, web_search, etc.) is implemented in its own module.
-   - **Types:** Shared types are defined separately to reduce duplication.
+   - **Models:** Contains data structures and types for API request/response schemas. The `ProviderPreferences` and `WebSearch` modules have been added to provide enhanced type‑safety for routing options, and we now also include text completion types.
+   - **API Modules:** Each endpoint (chat, completions, web_search, etc.) is implemented in its own module. The new text completion endpoint is located in `api/completion.rs`.
+   - **Types:** Shared types are defined separately to reduce duplication, with new types for CompletionRequest and CompletionResponse housed in `types/completion.rs`.
    - **Utils:** Helper functions (HTTP, authentication, validation) are isolated.
 
 2. **Clear Separation of Concerns:**
@@ -89,6 +90,12 @@ openrouter_api/
 9. **Streaming Support:**
    Real‑time chat completions are supported via Server‑Sent Events (SSE). The implementation correctly handles streaming by ignoring SSE comment lines and yielding valid JSON data chunks, enabling responsive and dynamic UI updates.
 
+10. **Text Completion Endpoint:**
+    The new text completion endpoint allows users to send a simple prompt to generate a text completion.
+    - **Request:** At minimum, the `model` and `prompt` fields are required. Additional parameters (such as temperature, top_p, etc.) are supported via a flattened field.
+    - **Response:** Returns an object with an optional `id` and a list of `choices` that contain the generated text, the index (if available), and the finish reason.
+    - The implementation follows the same error handling and header building patterns as the chat endpoint.
+
 ---
 
 ## Type‑State Builder Pattern
@@ -102,7 +109,7 @@ A key feature of this library is the type‑state builder pattern used to create
   Once the base URL is set (which must include a trailing slash), the client transitions to a state where it is not yet authenticated.
 
 - **Ready State:**
-  When the API key (and optionally other settings like timeout and custom headers) are provided, the client transitions to the Ready state, where all HTTP resources are fully built and API methods like `chat_completion` and `web_search` may be invoked.
+  When the API key (and optionally other settings like timeout and custom headers) are provided, the client transitions to the Ready state, where all HTTP resources are fully built and API methods like `chat_completion`, `completions`, and `web_search` may be invoked.
 
 The state markers (`Unconfigured`, `NoAuth`, and `Ready`) are defined in `src/client.rs` and re‑exported through `src/lib.rs`.
 
@@ -156,7 +163,11 @@ impl OpenRouterClient<Ready> {
     pub fn chat(&self) -> chat::ChatApi {
         chat::ChatApi::new(self.http_client.clone().unwrap(), &self.config)
     }
-    // Other API modules: completion, web_search, etc.
+    /// Access the text completion API.
+    pub fn completions(&self) -> crate::api::completion::CompletionApi {
+        crate::api::completion::CompletionApi::new(self.http_client.clone().unwrap(), &self.config)
+    }
+    // Other API modules: web_search, etc.
 }
 ```
 
@@ -177,32 +188,30 @@ impl OpenRouterClient<Ready> {
 
 ### Phase 2: Additional Endpoints and Advanced Features
 - [x] **Streaming Support:**
-  - Implement a streaming API for chat completions.
-- [ ] **Text Completion Endpoint:**
-  - Build similar functionality for text completions.
-- [ ] **Models Listing and Credits:**
-  - Implement endpoints to list models and fetch credit details.
+  - Implement a streaming API for chat completions via Server‑Sent Events (SSE).
+- [x] **Text Completion Endpoint:**
+  - New endpoint for text completions with a request that accepts `model`, `prompt` and other parameters.
+  - Returns an object with an optional `id` and a list of choices (with text, index, and finish_reason).
+- [x] **Web Search Endpoint:**
+  - Introduce a new endpoint for web search queries with type‑safe request/response models.
 - [x] **Tool Calling & Structured Outputs:**
   - Implement support for tool calls with JSON Schema validation, including optional validation and fallback modes.
 - [x] **Provider Preferences & Model Routing:**
   - Enable configuration for provider preferences, fallbacks, and routing options via the strongly‑typed ProviderPreferences module.
-- [x] **Web Search Endpoint:**
-  - Introduce a new endpoint for web search queries with type‑safe request and response models.
+- [ ] **Models Listing and Credits:**
+  - Implement endpoints to list models and fetch credit details.
 
 ### Phase 3: Robust Testing & Documentation
 - [ ] **Test Coverage:**
-  - Expand integration and unit tests.
-  - Implement mock tests using a dedicated mock server.
+  - Expand integration and unit tests, including tests for the text completion endpoint.
 - [ ] **Documentation Improvements:**
   - Enhance inline documentation and API docs using rustdoc.
   - Provide additional usage examples in the `/examples` directory.
 - [ ] **Continuous Integration (CI):**
-  - Set up CI pipelines for continuous builds and testing.
+  - Set up CI pipelines for automated builds and testing.
 
 ---
 
 ## Summary
 
-The OpenRouter API Client Library is a robust, modular, and type‑safe interface for interacting with the OpenRouter API. With features such as streaming chat completions via SSE, structured output validation, provider preferences, and a new web search endpoint, the library provides a comprehensive solution for advanced applications. As the project evolves, further endpoints and enhanced testing/documentation will continue to improve its capabilities.
-
-------------------------------------------------
+The OpenRouter API Client Library is a robust, modular, and type‑safe interface for interacting with the OpenRouter API. It now includes not only streaming chat completions, web search, and tool calling but also a new text completion endpoint that supports a range of configurable generation parameters. As the project evolves, further endpoints and enhanced testing/documentation will continue to improve its capabilities.
