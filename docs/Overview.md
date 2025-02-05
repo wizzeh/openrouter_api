@@ -1,8 +1,6 @@
----
 
 ## Project Directory Structure
 
-```
 openrouter_api/
 ├── src/
 │   ├── lib.rs                 # Library root, public exports, and high-level documentation
