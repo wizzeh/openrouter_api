@@ -1,4 +1,5 @@
 pub mod chat;
+pub mod common;
 pub mod completion;
 pub mod models;
 pub mod provider;

@@ -9,11 +9,15 @@ mod integration_tests {
     use crate::client::{OpenRouterClient, Unconfigured};
     #[allow(unused_imports)]
     use crate::models::chat::{ChatMessage, ChatRole};
+    use crate::models::provider_preferences::{
+        DataCollection, ProviderPreferences, ProviderSort, Quantization,
+    };
+    #[allow(unused_imports)]
     use crate::models::structured::{JsonSchemaConfig, JsonSchemaDefinition};
     #[allow(unused_imports)]
     use crate::models::tool::{FunctionCall, FunctionDescription, Tool, ToolCall};
     use crate::types::chat::{ChatCompletionRequest, ChatCompletionResponse, Message};
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::env;
     use url::Url;
 
@@ -185,66 +189,36 @@ mod integration_tests {
     }
 
     #[tokio::test]
-    async fn test_structured_output_integration() -> Result<(), Box<dyn std::error::Error>> {
-        // Parse the base URL.
-        let base_url: Url = "https://api.example.com/".parse()?;
-
-        // Build the client: Unconfigured -> NoAuth -> Ready.
-        let client = OpenRouterClient::<Unconfigured>::new()
-            .with_base_url(base_url)?
-            .with_api_key("dummy_key");
-
-        // Prepare a simple chat message using ChatMessage (models) and convert to Message.
-        let chat_messages = vec![crate::models::chat::ChatMessage {
-            role: crate::models::chat::ChatRole::User,
-            content: "What is the weather like?".into(),
-        }];
-        let messages: Vec<Message> = chat_messages.into_iter().map(Into::into).collect();
-
-        // Build a JSON Schema definition for the expected structured output.
-        let schema_def = JsonSchemaDefinition {
-            schema_type: "object".into(),
-            properties: {
-                let mut map = serde_json::Map::new();
-                map.insert(
-                    "location".into(),
-                    json!({"type": "string", "description": "City or location name"}),
-                );
-                map.insert(
-                    "temperature".into(),
-                    json!({"type": "number", "description": "Temperature in Celsius"}),
-                );
-                map.insert(
-                    "conditions".into(),
-                    json!({"type": "string", "description": "Weather conditions description"}),
-                );
-                map
-            },
-            required: Some(vec![
-                "location".into(),
-                "temperature".into(),
-                "conditions".into(),
-            ]),
-            additional_properties: Some(false),
+    async fn test_provider_preferences_serialization() -> Result<(), Box<dyn std::error::Error>> {
+        // Build a provider preferences configuration.
+        let preferences = ProviderPreferences {
+            order: Some(vec!["OpenAI".to_string(), "Anthropic".to_string()]),
+            allow_fallbacks: Some(false),
+            require_parameters: Some(true),
+            data_collection: Some(DataCollection::Deny),
+            ignore: Some(vec!["Azure".to_string()]),
+            quantizations: Some(vec![Quantization::Fp8, Quantization::Int8]),
+            sort: Some(ProviderSort::Throughput),
         };
 
-        let json_schema_config = JsonSchemaConfig {
-            name: "weather".into(),
-            strict: true,
-            schema: schema_def,
-        };
+        // Start with an empty extra parameters object.
+        let extra_params = json!({});
 
-        // Build a completion request with structured output enabled.
-        let request_payload = client
-            .completion_request(messages)
-            .with_structured_output(json_schema_config, true, false)
-            .build();
+        // Use the request builder to attach the provider preferences.
+        let builder =
+            crate::api::request::RequestBuilder::new("openai/gpt-4o", vec![], extra_params)
+                .with_provider_preferences(preferences);
 
-        // Serialize the payload to JSON.
-        let payload_json = serde_json::to_string_pretty(&request_payload)?;
-        println!("Structured Request payload:\n{}", payload_json);
+        // Serialize the complete payload.
+        let payload = builder.build();
+        let payload_json = serde_json::to_string_pretty(&payload)?;
+        println!("Payload with provider preferences:\n{}", payload_json);
 
-        // In a full integration test, you'd send this payload, receive and validate the response against the JSON Schema.
+        // Check that the serialized JSON contains the "provider" key with the expected configuration.
+        let payload_value: Value = serde_json::from_str(&payload_json)?;
+        let provider_config = payload_value.get("provider").expect("provider key missing");
+        assert_eq!(provider_config.get("allowFallbacks").unwrap(), false);
+        assert_eq!(provider_config.get("sort").unwrap(), "throughput");
 
         Ok(())
     }

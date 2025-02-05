@@ -1,7 +1,3 @@
--------------------------------------------------
-docs/Overview.md
--------------------------------------------------
-
 # OpenRouter API Client Library Overview
 
 This project is a Rust client library for the OpenRouter API that matches the documentation and follows Rust best practices. It is designed to be modular, maintainable, and type‑safe; it uses a type‑state builder pattern for client configuration so that required settings (such as the base URL and API key) are enforced at compile time.
@@ -26,7 +22,8 @@ openrouter_api/
 │   │   ├── completion.rs      # Text completion types
 │   │   ├── common.rs          # Shared types used across endpoints
 │   │   ├── error.rs           # API error types and conversions
-│   │   └── parameters.rs      # LLM parameter types (stub for now)
+│   │   ├── parameters.rs      # LLM parameter types (stub for now)
+│   │   └── provider_preferences.rs  # Provider preferences & routing settings
 │   ├── api/                   # API endpoint implementations
 │   │   ├── mod.rs             # Exports for API implementations
 │   │   ├── chat.rs            # Chat completion endpoint implementation
@@ -66,7 +63,7 @@ openrouter_api/
 ## Key Design Considerations
 
 1. **Modular Organization:**
-   - **Models:** Contains all data structures and types representing API request/response schemas.
+   - **Models:** Contains all data structures and types representing API request/response schemas. The recent addition of a strongly‑typed `ProviderPreferences` module allows users to configure routing options—including provider ordering, fallback behavior, and quantization filtering—with enhanced type‑safety.
    - **API Modules:** Each API endpoint (chat, completions, etc.) is implemented in its own module.
    - **Types:** Common and shared types are defined separately to help reduce duplication.
    - **Utils:** Helper functions (HTTP, authentication, validation) are isolated.
@@ -84,13 +81,18 @@ openrouter_api/
    - A CHANGELOG and LICENSE file are maintained.
 
 5. **Robust Error Handling:**
-   All error variants (including HTTP errors, API errors, configuration issues, and now structured output errors) are centralized in the error modules (`models/error.rs` and re-exported via `src/error.rs`). The library uses the `thiserror` crate to partition errors appropriately.
+   All error variants (including HTTP errors, API errors, configuration issues, structured output errors, and now provider preference errors) are centralized in the error modules (`models/error.rs` and re-exported via `src/error.rs`). The library uses the `thiserror` crate to partition errors appropriately.
 
 6. **Structured Outputs Support:**
-   - **Overview:** Structured outputs allow the API to return responses adhering to a specified JSON Schema. This ensures that responses following tool calls and non‐interactive endpoints are consistent and type‑safe.
+   - **Overview:** Structured outputs allow the API to return responses adhering to a specified JSON Schema. This ensures that responses following tool calls and non‑interactive endpoints are consistent and type‑safe.
    - **Configuration:** Structured output support is integrated at the client level via the type‑state builder. Clients can enable structured output on any endpoint (except interactive chat) by invoking methods on the unified request builder.
    - **Validation:** Using the jsonschema crate along with serde, responses can be asynchronously validated against a strongly‑typed JSON Schema provided by the client.
-   - **Error Handling:** If a model does not support structured outputs or if the JSON Schema validation fails, the client returns detailed error information via error variants like `StructuredOutputNotSupported` or `SchemaValidationError`. Optionally, a fallback to unstructured output can be enabled.
+   - **Error Handling:** If a model does not support structured outputs or if JSON Schema validation fails, the client returns detailed error information via error variants like `StructuredOutputNotSupported` or `SchemaValidationError`. Optionally, a fallback to unstructured output can be enabled.
+
+7. **Provider Preferences & Routing:**
+   - **Overview:** A new feature that enables developers to configure routing preferences for model calls via a strongly‑typed `ProviderPreferences` interface. This includes options such as provider ordering, fallback behavior, parameter requirements, data collection policies, providers to ignore, quantization filters, and sorting strategies.
+   - **Implementation:** These preferences are integrated into the unified request builder as additional parameters. They are serialized into the `provider` field of the request payload to be handled by the API, while errors relating to misconfigurations are centrally managed.
+   - **Extensibility:** While the current implementation focuses on the happy path, the design supports future runtime and (potentially) compile-time validations as provider capabilities evolve.
 
 ---
 
@@ -187,10 +189,10 @@ Since the project is under active development, here is the current and planned i
   - Build similar functionality for text completions.
 - [ ] **Models Listing and Credits:**
   - Implement endpoints to list models and fetch credit details.
-- [ ] **Tool Calling & Structured Outputs:**
+- [x] **Tool Calling & Structured Outputs:**
   - Implement support for tool calls with JSON Schema validation. This includes integration of structured output support into the request builder with optional validation and fallback modes.
-- [ ] **Provider Preferences & Routing:**
-  - Add support for options such as model fallbacks, routing preferences, and provider filtering.
+- [x] **Provider Preferences & Model Routing:**
+  - Enable configuration for provider preferences, fallbacks, and routing options via the new strongly‑typed ProviderPreferences module.
 
 ### Phase 3: Testing, Documentation, and CI
 - [ ] **Test Coverage:**
@@ -208,39 +210,8 @@ Since the project is under active development, here is the current and planned i
 
 The OpenRouter API Client Library is designed to be a robust, modular, and type‑safe interface for interacting with the OpenRouter API. Its architecture uses a type‑state builder pattern to enforce proper configuration and resource initialization, ensuring that only a fully configured client can be used to make API calls.
 
-With the new structured outputs support, clients can now request responses that adhere to a specified JSON Schema, ensuring consistency and type‑safety across non‑interactive endpoints. Detailed error handling and the option to validate or fallback on unstructured output further enhance the robustness of the SDK.
+With the new structured outputs support and provider preferences module, clients can now request responses that adhere to a specified JSON Schema and control routing behavior using strongly‑typed provider settings. Detailed error handling and the option to validate or fallback on unstructured output further enhance the robustness of the SDK.
 
 This document provides an overview of the directory structure, design decisions, and our phased implementation plan. As the project evolves, additional endpoints and features will be introduced following this modular and test‑driven design.
 
 ---
-
-
-The next steps to fully complete and polish the feature integration include:
-
-1. Documentation and README Updates
- • Update the SDK’s documentation to include details on how to configure tool calling (both in request payloads and response validation).
- • Add inline code comments and example usage in the docs to help consumers understand how to enable and use tool calling.
-
-2. Extended Error Handling and Logging
- • Enhance the error messages for tool calls by including additional context (e.g., the failed function name and arguments).
- • Integrate structured logging or tracing so that production logs include detailed information during tool call validation failures.
-
-3. Streaming Support (if applicable)
- • Evaluate whether tool calling responses need specialized handling in streaming mode.
- • If so, add support to parse and validate progressive tool call chunks.
-
-4. Additional Unit and Integration Tests
- • Write more tests to cover various edge cases, such as multiple tool calls in a single message, concurrent tool call responses, and fallback behavior when JSON Schema validation fails.
- • Also create tests where the SDK recovers gracefully if the response includes partly-invalid tool call data and returns a fallback (if the consumer opted for that behavior).
-
-5. Validate Structured Output with JSON Schema
- • Integrate and test asynchronous JSON Schema validation for structured outputs and tool call responses using the jsonschema crate.
- • Document the behavior if schema validation fails and fallback is enabled.
-
-6. Code Cleanup & Refactoring
- • Perform a review of the new changes and ensure consistency with existing code conventions and type‑state patterns.
- • Refactor any common response handling logic into a dedicated module if needed for clarity.
-
-7. Update CI/CD and Build Pipelines
- • Ensure that all new tests run successfully on your Continuous Integration pipeline.
- • Add any new linting rules related to the tool calling module to maintain code quality.

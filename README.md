@@ -6,16 +6,16 @@ OpenRouter API Client Library is a Rust client for interfacing with the OpenRout
 
 ## Features
 
-- **Modular Organization:** Structure divided into models, API endpoints, types, and utility functions.
-- **Type‑State Builder:** Guarantees compile‑time validation of client configuration.
+- **Modular Organization:** The code is organized into clear modules for models, API endpoints, common types, and utilities.
+- **Type‑State Builder:** Guarantees compile‑time validation of client configuration for a robust development experience.
 - **HTTP Integration:** Uses [reqwest](https://crates.io/crates/reqwest) with rustls‑tls for secure asynchronous HTTP requests.
-- **Robust Error Handling:** Centralized error module using `thiserror` for consistent error types.
-- **Structured Outputs:** Optionally request structured responses and enable JSON Schema validation using user‑provided schemas. This helps enforce that responses are type‑safe and adhere to expected formats.
+- **Robust Error Handling:** Centralized error management using the `thiserror` crate ensures consistent error types across the library.
+- **Structured Outputs:** Optionally request structured responses and enable JSON Schema validation using user‑provided schemas. This helps enforce consistent, type‑safe response formats.
 - **Tool Calling Capability:** Define function‑type tools that the model can invoke. The client supports multiple concurrent tool calls per response and validates that each tool call conforms to the expected format.
+- **Provider Preferences & Routing:** Configure model fallbacks, routing preferences, and provider filtering via a new strongly‑typed interface.
 - **Future Roadmap:**
   - Streaming support for real‑time completions.
   - Text completion endpoint.
-  - Model routing and provider preferences.
   - Endpoints for credits, generation metadata, and available models.
   - Extended tests and documentation improvements.
 
@@ -152,7 +152,7 @@ export OPENROUTER_API_KEY=sk-...
 cargo test
 ```
 
-This will run the integration tests in `tests/integration_tests.rs`, which now include scenarios for structured outputs and tool calling (both valid and invalid responses).
+This will run the integration tests in `tests/integration_tests.rs`, which now include scenarios for structured outputs, tool calling, and provider preferences.
 
 ## Implementation Plan
 
@@ -179,7 +179,7 @@ The project is under active development. The following roadmap outlines upcoming
 - [x] **Tool Calling & Structured Outputs:**
   - Add support for tool calls, allowing the specification of callable functions.
   - Enable structured responses with JSON Schema validation and fallback behavior.
-- [ ] **Provider Preferences & Model Routing:**
+- [x] **Provider Preferences & Model Routing:**
   - Enable configuration for provider preferences, fallbacks, and routing options.
 
 ### Phase 3: Robust Testing & Documentation
@@ -201,9 +201,12 @@ Distributed under either the MIT license or the Apache License, Version 2.0. See
 
 –––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 ## Debugging and Verbose Test Output
+
 For detailed logging during tests, you can run:
+
 ```bash
 cargo test -- --nocapture
+```
 ```
 
 -------------------------------------------------

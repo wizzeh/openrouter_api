@@ -1,9 +1,16 @@
-/*
-   src/models/tool.rs
+/*!
+   # Tool Calling Module
 
-   This module defines the data types required for tool calling functionality.
-   It includes types for function descriptions, tools representing callable functions,
-   choices for tool selection, and the tool call details returned in API responses.
+   This module defines the data types required for tool calling functionality. It includes types for representing function descriptions, callable tools, tool calls returned in API responses, and tool selection options.
+
+   ## Overview
+
+   - **FunctionDescription:** Describes a callable function with a name, optional description, and a JSON Schema for its parameters.
+   - **Tool:** An enum representing available types of tools. Currently, only function‑type tools are supported.
+   - **FunctionCall:** Represents the details of a requested tool call including the function name and JSON‑encoded arguments.
+   - **ToolCall:** Captures the tool call details as returned by the API, including a unique identifier and the associated function call details.
+   - **ToolChoice:** Represents the possible outcomes when the model must select a tool (for example, "none", "auto", or a specific function choice).
+   - **FunctionName:** A simple structure to represent a function name for tool selection.
 */
 
 use serde::{Deserialize, Serialize};
@@ -23,11 +30,13 @@ pub struct FunctionDescription {
 }
 
 /// Encapsulates a tool that the model can call.
-/// Currently, we only support function‑type tools.
+///
+/// Currently, only function‑type tools are supported.
+/// In the future, this enum could be extended for other tool types.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Tool {
-    /// A function call tool with a detailed function description.
+    /// A function call tool with an associated [FunctionDescription].
     Function {
         #[serde(rename = "function")]
         function: FunctionDescription,
@@ -35,32 +44,38 @@ pub enum Tool {
 }
 
 /// Represents the specific function call requested by the model.
+///
+/// The `arguments` field is a JSON‑encoded string that should be parseable into a structured object.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionCall {
     /// The name of the function to call.
     pub name: String,
     /// A JSON string representing the arguments for the function call.
-    /// This string should be parseable into a structured object.
     pub arguments: String,
 }
 
-/// Represents the tool call details in an API response.
-/// This is used when the model indicates that a tool should be invoked.
+/// Represents the tool call details returned by the API.
+///
+/// This structure appears in responses when the model indicates that a tool should be invoked.
+/// The `kind` field must be "function".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
     /// A unique identifier for the tool call.
     pub id: String,
-    /// The type of call. Currently, this must be "function".
+    /// The type of call. It must be "function" for function calls.
     #[serde(rename = "type")]
     pub kind: String,
-    /// The details of the function call, including its name and arguments.
+    /// The details of the function call, including its function name and arguments.
     #[serde(rename = "function")]
     pub function_call: FunctionCall,
 }
 
-/// Represents a tool selection option for when the model must choose among available tools.
-/// This can be either no tool selected ("none"), an automatic selection ("auto"),
-/// or a specific function choice.
+/// Represents a tool selection option when the model must choose among available tools.
+///
+/// This enum covers three cases:
+/// - **None:** No tool is selected (represented by a string, e.g. "none").
+/// - **Auto:** The model automatically selects a tool (represented as "auto").
+/// - **FunctionChoice:** A specific function is selected. The `kind` field must be "function".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolChoice {
@@ -68,7 +83,7 @@ pub enum ToolChoice {
     None(String),
     /// The model automatically selects a tool.
     Auto(String),
-    /// A specific function is selected. The `type` field is fixed to "function".
+    /// A specific function is selected.
     FunctionChoice {
         #[serde(rename = "type")]
         kind: String,
