@@ -1,45 +1,34 @@
 use crate::error::{Error, Result};
+#[allow(unused_imports)]
 use crate::types;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use std::marker::PhantomData;
 use std::time::Duration;
 use url::Url;
 
+/// Client configuration containing API key, base URL, and additional settings.
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
     pub api_key: Option<String>,
-    // Ensure the base URL ends with a trailing slash.
     pub base_url: Url,
     pub http_referer: Option<String>,
     pub site_title: Option<String>,
     pub timeout: Duration,
 }
 
-impl Default for ClientConfig {
-    fn default() -> Self {
-        // Use trailing slash so that join works as expected.
-        Self {
-            api_key: None,
-            base_url: Url::parse("https://openrouter.ai/api/v1/").unwrap(),
-            http_referer: None,
-            site_title: None,
-            timeout: Duration::from_secs(30),
-        }
-    }
-}
-
 impl ClientConfig {
     /// Build HTTP headers required for making API calls.
     pub fn build_headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", self.api_key.as_ref().unwrap()))
-                .expect("Invalid API key header"),
-        );
+        if let Some(ref key) = self.api_key {
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {}", key)).expect("Invalid API key header"),
+            );
+        }
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         if let Some(ref referer) = self.http_referer {
-            headers.insert("HTTP-Referer", HeaderValue::from_str(referer).unwrap());
+            headers.insert("Referer", HeaderValue::from_str(referer).unwrap());
         }
         if let Some(ref title) = self.site_title {
             headers.insert("X-Title", HeaderValue::from_str(title).unwrap());
@@ -53,7 +42,7 @@ pub struct Unconfigured;
 pub struct NoAuth;
 pub struct Ready;
 
-/// The main OpenRouter client using a type‑state builder pattern.
+/// Main OpenRouter client using a type‑state builder pattern.
 pub struct OpenRouterClient<State = Unconfigured> {
     pub config: ClientConfig,
     pub http_client: Option<reqwest::Client>,
@@ -61,17 +50,24 @@ pub struct OpenRouterClient<State = Unconfigured> {
 }
 
 impl OpenRouterClient<Unconfigured> {
-    /// Create a new unconfigured client.
+    /// Creates a new unconfigured client.
     pub fn new() -> Self {
         Self {
-            config: ClientConfig::default(),
+            config: ClientConfig {
+                api_key: None,
+                // Default base URL; can be overridden with with_base_url().
+                base_url: "https://openrouter.ai/api/v1/".parse().unwrap(),
+                http_referer: None,
+                site_title: None,
+                timeout: Duration::from_secs(30),
+            },
             http_client: None,
             _state: PhantomData,
         }
     }
 
-    /// Set the base URL and transition to the NoAuth state.
-    /// The base URL should include a trailing slash (e.g., "https://openrouter.ai/api/v1/").
+    /// Sets the base URL and transitions to the NoAuth state.
+    /// The base URL must include a trailing slash.
     pub fn with_base_url(
         mut self,
         base_url: impl Into<String>,
@@ -87,32 +83,32 @@ impl OpenRouterClient<Unconfigured> {
     fn transition_to_no_auth(self) -> OpenRouterClient<NoAuth> {
         OpenRouterClient {
             config: self.config,
-            http_client: self.http_client,
+            http_client: None,
             _state: PhantomData,
         }
     }
 }
 
 impl OpenRouterClient<NoAuth> {
-    /// Supply the API key and transition to the Ready state.
+    /// Supplies the API key and transitions to the Ready state.
     pub fn with_api_key(mut self, api_key: impl Into<String>) -> OpenRouterClient<Ready> {
         self.config.api_key = Some(api_key.into());
         self.transition_to_ready()
     }
 
-    /// Optionally set the request timeout.
+    /// Optionally sets the request timeout.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.config.timeout = timeout;
         self
     }
 
-    /// Optionally set the HTTP referer header.
+    /// Optionally sets the HTTP referer header.
     pub fn with_http_referer(mut self, referer: impl Into<String>) -> Self {
         self.config.http_referer = Some(referer.into());
         self
     }
 
-    /// Optionally set the site title header.
+    /// Optionally sets the site title header.
     pub fn with_site_title(mut self, title: impl Into<String>) -> Self {
         self.config.site_title = Some(title.into());
         self
@@ -121,6 +117,7 @@ impl OpenRouterClient<NoAuth> {
     fn transition_to_ready(self) -> OpenRouterClient<Ready> {
         let http_client = reqwest::Client::builder()
             .timeout(self.config.timeout)
+            .default_headers(self.config.build_headers())
             .build()
             .expect("Failed to create HTTP client");
         OpenRouterClient {
@@ -132,12 +129,27 @@ impl OpenRouterClient<NoAuth> {
 }
 
 impl OpenRouterClient<Ready> {
-    /// Call the chat completions API.
+    /// Provides access to the chat endpoint.
+    pub fn chat(&self) -> crate::api::chat::ChatApi {
+        crate::api::chat::ChatApi::new(self.http_client.clone().unwrap(), &self.config)
+    }
+
+    /// Returns a new request builder for the completions endpoint.
+    /// Extra parameters are provided as a generic JSON object.
+    pub fn completion_request(
+        &self,
+        messages: Vec<crate::models::chat::ChatMessage>,
+    ) -> crate::api::request::RequestBuilder<serde_json::Value> {
+        let extra_params = serde_json::json!({});
+        crate::api::request::RequestBuilder::new("openai/gpt-4", messages, extra_params)
+    }
+
+    /// Example chat completion method.
     pub async fn chat_completion(
         &self,
-        request: types::chat::ChatCompletionRequest,
-    ) -> Result<types::chat::ChatCompletionResponse> {
-        // Notice: join "chat/completions" as a relative path; the base URL includes "v1/".
+        request: crate::types::chat::ChatCompletionRequest,
+    ) -> Result<crate::types::chat::ChatCompletionResponse> {
+        // Build the full URL by joining relative path.
         let url = self
             .config
             .base_url
@@ -168,7 +180,7 @@ impl OpenRouterClient<Ready> {
         self.handle_response(response).await
     }
 
-    /// Handle the response by reading text and parsing JSON.
+    /// Handles the response by deserializing JSON.
     async fn handle_response<T>(&self, response: reqwest::Response) -> Result<T>
     where
         T: serde::de::DeserializeOwned,

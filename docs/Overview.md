@@ -84,7 +84,13 @@ openrouter_api/
    - A CHANGELOG and LICENSE file are maintained.
 
 5. **Robust Error Handling:**
-   All errors are centralized in the `models/error.rs` module (and re-exported via `src/error.rs`). The library uses the `thiserror` crate to partition HTTP errors, API errors, configuration errors, and more.
+   All error variants (including HTTP errors, API errors, configuration issues, and now structured output errors) are centralized in the error modules (`models/error.rs` and re-exported via `src/error.rs`). The library uses the `thiserror` crate to partition errors appropriately.
+
+6. **Structured Outputs Support:**
+   - **Overview:** Structured outputs allow the API to return responses adhering to a specified JSON Schema. This ensures that responses following tool calls and non‐interactive endpoints are consistent and type‑safe.
+   - **Configuration:** Structured output support is integrated at the client level via the type‑state builder. Clients can enable structured output on any endpoint (except interactive chat) by invoking methods on the unified request builder.
+   - **Validation:** Using the jsonschema crate along with serde, responses can be asynchronously validated against a strongly‑typed JSON Schema provided by the client.
+   - **Error Handling:** If a model does not support structured outputs or if the JSON Schema validation fails, the client returns detailed error information via error variants like `StructuredOutputNotSupported` or `SchemaValidationError`. Optionally, a fallback to unstructured output can be enabled.
 
 ---
 
@@ -93,15 +99,15 @@ openrouter_api/
 One of the core design features is the type‑state builder pattern for creating an `OpenRouterClient`. This pattern enforces that required configuration steps (like setting the base URL and API key) are performed at compile time before making API calls. For example:
 
 - **Unconfigured State:**
-  The client is first created in an unconfigured state.
+  The client is initially created in an unconfigured state.
 
 - **NoAuth State:**
-  After setting the base URL (which ends with a trailing slash), the client transitions into a state that is not yet authenticated.
+  After setting the base URL (which must end with a trailing slash), the client transitions into a state that is not yet authenticated.
 
 - **Ready State:**
-  Once an API key is provided (and optional settings such as timeout, HTTP referer, and site title are set), the client transitions into the Ready state where HTTP resources (like the reqwest client) are fully built. Only then can API methods like `chat_completion` be invoked.
+  Once an API key is provided (and additional settings such as timeout, HTTP referer, and site title are set), the client transitions into the Ready state where HTTP resources (such as the reqwest client) are fully built. Only then can API methods like `chat_completion` be invoked.
 
-The type definitions for the state markers (`Unconfigured`, `NoAuth`, and `Ready`) are simple empty structs that serve only as markers. They are defined in `src/client.rs` and re-exported from `src/lib.rs`.
+The type definitions for the state markers (`Unconfigured`, `NoAuth`, and `Ready`) are defined in `src/client.rs` and re-exported through `src/lib.rs`.
 
 Below is an excerpt of the type‑state builder implementation for clarity:
 
@@ -182,7 +188,7 @@ Since the project is under active development, here is the current and planned i
 - [ ] **Models Listing and Credits:**
   - Implement endpoints to list models and fetch credit details.
 - [ ] **Tool Calling & Structured Outputs:**
-  - Implement support for tool calls with JSON Schema validation.
+  - Implement support for tool calls with JSON Schema validation. This includes integration of structured output support into the request builder with optional validation and fallback modes.
 - [ ] **Provider Preferences & Routing:**
   - Add support for options such as model fallbacks, routing preferences, and provider filtering.
 
@@ -200,12 +206,10 @@ Since the project is under active development, here is the current and planned i
 
 ## Summary
 
-The OpenRouter API Client Library is designed to be a robust, modular, and type‑safe interface for interacting with the OpenRouter API. Its architecture uses the type‑state builder pattern to enforce proper configuration and resource initialization, ensuring that only a fully configured client can be used to make API calls.
+The OpenRouter API Client Library is designed to be a robust, modular, and type‑safe interface for interacting with the OpenRouter API. Its architecture uses a type‑state builder pattern to enforce proper configuration and resource initialization, ensuring that only a fully configured client can be used to make API calls.
+
+With the new structured outputs support, clients can now request responses that adhere to a specified JSON Schema, ensuring consistency and type‑safety across non‑interactive endpoints. Detailed error handling and the option to validate or fallback on unstructured output further enhance the robustness of the SDK.
 
 This document provides an overview of the directory structure, design decisions, and our phased implementation plan. As the project evolves, additional endpoints and features will be introduced following this modular and test‑driven design.
 
 ---
-
-Feel free to contribute or open issues if you have suggestions for improvement. Happy coding!
-
--------------------------------------------------

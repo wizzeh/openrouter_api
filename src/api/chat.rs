@@ -1,39 +1,42 @@
-// src/api/chat.rs
-use crate::error::Result;
-use crate::types::*;
+use crate::client::ClientConfig;
+#[allow(unused_imports)]
+use crate::error::{Error, Result};
+use crate::types::chat::{ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse};
+use futures::stream::Stream;
+use reqwest::Client;
 
-impl OpenRouterClient<Ready> {
-    /// Creates a chat completion
-    ///
-    /// This endpoint is compatible with OpenAI's chat completion API.
-    pub async fn create_chat_completion(
+/// Public chat API, providing methods for chat completions.
+pub struct ChatApi {
+    pub client: Client,
+    pub config: ClientConfig,
+}
+
+impl ChatApi {
+    /// Creates a new ChatApi instance given a reqwest client and a client configuration.
+    pub fn new(client: Client, config: &ClientConfig) -> Self {
+        // Clone the config because ChatApi owns its own copy.
+        Self {
+            client,
+            config: config.clone(),
+        }
+    }
+
+    /// Example method for chat completion that returns a complete response.
+    pub async fn chat_completion(
         &self,
         request: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
-        let url = self.config.base_url.join("/chat/completions")?;
-
-        let response = self
-            .http_client
-            .as_ref()
-            .unwrap()
-            .post(url)
-            .json(&request)
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.config.api_key.as_ref().unwrap()),
-            )
-            .header("Content-Type", "application/json")
-            .send()
-            .await?;
-
-        self.handle_response(response).await
+        // Here you would implement your chat completion logic using self.client.
+        // For now, we leave it unimplemented.
+        unimplemented!()
     }
 
-    /// Creates a streaming chat completion
-    pub async fn create_chat_completion_stream(
+    /// Example method that returns a stream of chat completion chunks.
+    pub fn chat_completion_stream(
         &self,
         request: ChatCompletionRequest,
-    ) -> Result<impl Stream<Item = Result<ChatCompletionChunk>>> {
-        // Implementation
+    ) -> impl Stream<Item = Result<ChatCompletionChunk>> {
+        // Implement a streaming version. For now we return an empty stream.
+        futures::stream::empty()
     }
 }
