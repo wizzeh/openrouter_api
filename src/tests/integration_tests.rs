@@ -7,8 +7,10 @@
 #[cfg(test)]
 mod integration_tests {
     use crate::client::{OpenRouterClient, Unconfigured};
+    #[allow(unused_imports)]
     use crate::models::chat::{ChatMessage, ChatRole};
     use crate::models::structured::{JsonSchemaConfig, JsonSchemaDefinition};
+    #[allow(unused_imports)]
     use crate::models::tool::{FunctionCall, FunctionDescription, Tool, ToolCall};
     use crate::types::chat::{ChatCompletionRequest, ChatCompletionResponse, Message};
     use serde_json::json;
@@ -27,14 +29,14 @@ mod integration_tests {
             .map_err(|e| format!("OPENROUTER_API_KEY must be set in the environment: {}", e))?;
 
         // Build the client: Unconfigured -> NoAuth -> Ready.
-        let client = OpenRouterClient::<Unconfigured>::new()
+        let _client = OpenRouterClient::<Unconfigured>::new()
             .with_base_url("https://openrouter.ai/api/v1/")?
             .with_http_referer("https://github.com/your_org/your_repo")
             .with_site_title("OpenRouter Rust SDK Tests")
             .with_api_key(api_key);
 
         // Create a basic chat completion request.
-        let request = ChatCompletionRequest {
+        let _request = ChatCompletionRequest {
             model: "openai/gpt-4o".to_string(),
             messages: vec![Message {
                 role: "user".to_string(),

@@ -215,30 +215,32 @@ This document provides an overview of the directory structure, design decisions,
 ---
 
 
-1. Response JSON Schema Validation – Currently, the client builds requests with the structured output parameters, but we still need to validate the response against the provided schema. That means:
- • When a response is received for a request with a structured output configuration, you should use the jsonschema crate to asynchronously validate that JSON against the client‑provided schema.
- • If validation fails, decide whether to return an error (using SchemaValidationError) or—if fallback is enabled—return the unstructured response.
- • Update the response handling logic (e.g. in the completions call) to include this validation step.
+The next steps to fully complete and polish the feature integration include:
 
-2. Fallback Handling – If you choose to support fallback behavior:
- • Implement logic to check if validation fails and fallback_on_failure is true. Then, bypass the structured validation error and return the raw or an unstructured response.
- • Document the behavior clearly so that consumers know what to expect.
+1. Documentation and README Updates
+ • Update the SDK’s documentation to include details on how to configure tool calling (both in request payloads and response validation).
+ • Add inline code comments and example usage in the docs to help consumers understand how to enable and use tool calling.
 
-3. Update Documentation – Be sure that the README and documentation (including API docs and examples) reflect:
- • How to enable structured outputs in the request builder.
- • What JSON Schema configuration looks like.
- • How the client validates the response and handles errors/fallback.
- • Any limitations (for example, streaming mode is not supported with structured outputs).
+2. Extended Error Handling and Logging
+ • Enhance the error messages for tool calls by including additional context (e.g., the failed function name and arguments).
+ • Integrate structured logging or tracing so that production logs include detailed information during tool call validation failures.
 
-4. Additional Tests – Beyond the integration test that prints the built payload:
- • Write tests that simulate receiving both valid and invalid JSON responses from the API.
- • Verify that the validation logic works as expected (i.e. when the schema matches and when it does not).
- • Test fallback behavior if that option is enabled.
+3. Streaming Support (if applicable)
+ • Evaluate whether tool calling responses need specialized handling in streaming mode.
+ • If so, add support to parse and validate progressive tool call chunks.
 
-5. Error Reporting and Logging – Enhance error messages (especially for SchemaValidationError) so that the user gets clear details on what part of the schema didn’t validate.
+4. Additional Unit and Integration Tests
+ • Write more tests to cover various edge cases, such as multiple tool calls in a single message, concurrent tool call responses, and fallback behavior when JSON Schema validation fails.
+ • Also create tests where the SDK recovers gracefully if the response includes partly-invalid tool call data and returns a fallback (if the consumer opted for that behavior).
 
-6. Future-proof Considerations – If you plan to eventually support structured output for more endpoints (or even for streaming, if that becomes viable):
- • Consider refactoring the response handling into a dedicated module.
- • Create unit tests for the JSON Schema validation logic itself.
+5. Validate Structured Output with JSON Schema
+ • Integrate and test asynchronous JSON Schema validation for structured outputs and tool call responses using the jsonschema crate.
+ • Document the behavior if schema validation fails and fallback is enabled.
 
-Once these steps are complete, your support for structured outputs will be fully integrated, robustly validated, and well documented—all crucial pieces for production‑ready functionality.
+6. Code Cleanup & Refactoring
+ • Perform a review of the new changes and ensure consistency with existing code conventions and type‑state patterns.
+ • Refactor any common response handling logic into a dedicated module if needed for clarity.
+
+7. Update CI/CD and Build Pipelines
+ • Ensure that all new tests run successfully on your Continuous Integration pipeline.
+ • Add any new linting rules related to the tool calling module to maintain code quality.

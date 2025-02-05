@@ -9,6 +9,7 @@ use crate::models::structured::JsonSchemaConfig;
 use crate::models::tool::Tool;
 use crate::types::chat::Message;
 use serde::Serialize;
+#[allow(unused_imports)]
 use serde_json::Value;
 
 /// Representation for enabling structured outputs in the request payload.

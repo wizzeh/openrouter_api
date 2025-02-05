@@ -10,11 +10,13 @@ OpenRouter API Client Library is a Rust client for interfacing with the OpenRout
 - **Type‑State Builder:** Guarantees compile‑time validation of client configuration.
 - **HTTP Integration:** Uses [reqwest](https://crates.io/crates/reqwest) with rustls‑tls for secure asynchronous HTTP requests.
 - **Robust Error Handling:** Centralized error module using `thiserror` for consistent error types.
+- **Structured Outputs:** Optionally request structured responses and enable JSON Schema validation using user‑provided schemas. This helps enforce that responses are type‑safe and adhere to expected formats.
+- **Tool Calling Capability:** Define function‑type tools that the model can invoke. The client supports multiple concurrent tool calls per response and validates that each tool call conforms to the expected format.
 - **Future Roadmap:**
   - Streaming support for real‑time completions.
-  - Tool calling capability and structured outputs.
+  - Text completion endpoint.
   - Model routing and provider preferences.
-  - Additional endpoints such as credits, generation metadata, and available models.
+  - Endpoints for credits, generation metadata, and available models.
   - Extended tests and documentation improvements.
 
 ## Getting Started
@@ -32,7 +34,7 @@ Ensure that you have Rust installed (tested with Rust v1.83.0) and that you're u
 
 ### Example Usage
 
-Below is a minimal example that creates a client, configures it with the API key, and sends a simple chat completion request.
+Below is a minimal example that creates a client, configures it with the API key, and sends a chat completion request with structured output enabled. You can also optionally pass tool calling instructions if you want the model to invoke external functions.
 
 ```rust
 use openrouter_api::{
@@ -40,6 +42,9 @@ use openrouter_api::{
     types::chat::{ChatCompletionRequest, Message},
     Result,
 };
+use openrouter_api::models::structured::{JsonSchemaConfig, JsonSchemaDefinition};
+use openrouter_api::models::tool::{Tool, FunctionDescription};
+use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -63,15 +68,67 @@ async fn main() -> Result<()> {
                 role: "user".to_string(),
                 content: "What is the meaning of life?".to_string(),
                 name: None,
+                tool_calls: None,
             }
         ],
         stream: None,
         response_format: None,
-        tools: None,
+        // Optionally, provide a list of tools the model may call.
+        tools: Some(vec![
+            Tool::Function {
+                function: FunctionDescription {
+                    name: "get_current_weather".into(),
+                    description: Some("Retrieve the current weather for a specified location".into()),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "location": { "type": "string", "description": "City or location name" }
+                        },
+                        "required": ["location"]
+                    }),
+                }
+            }
+        ]),
         provider: None,
         models: None,
         transforms: None,
     };
+
+    // Alternatively, if using the unified request builder, you can enable structured outputs:
+    let schema_def = JsonSchemaDefinition {
+        schema_type: "object".into(),
+        properties: {
+            let mut map = serde_json::Map::new();
+            map.insert(
+                "result".into(),
+                json!({ "type": "string", "description": "The answer to the query" }),
+            );
+            map
+        },
+        required: Some(vec!["result".into()]),
+        additional_properties: Some(false),
+    };
+
+    let json_schema_config = JsonSchemaConfig {
+        name: "answer".into(),
+        strict: true,
+        schema: schema_def,
+    };
+
+    // Build request payload using the unified builder with structured output enabled.
+    let request_payload = client
+        .completion_request(vec![
+            Message {
+                role: "user".to_string(),
+                content: "What is the meaning of life?".to_string(),
+                name: None,
+                tool_calls: None,
+            }
+        ])
+        .with_structured_output(json_schema_config, true, false)
+        .build();
+
+    println!("Structured Request payload:\n{}", serde_json::to_string_pretty(&request_payload)?);
 
     // Invoke the chat completion endpoint.
     let response = client.chat_completion(request).await?;
@@ -88,18 +145,18 @@ async fn main() -> Result<()> {
 
 ### Running Tests
 
-Before running tests, set the environment variable OPENROUTER_API_KEY with your API key:
+Before running tests, set the environment variable `OPENROUTER_API_KEY` with your API key:
 
 ```bash
 export OPENROUTER_API_KEY=sk-...
 cargo test
 ```
 
-This will run the integration test in `tests/integration_tests.rs`. If the API key and model are correctly set, the test will complete and print the returned model, response message, and usage metadata.
+This will run the integration tests in `tests/integration_tests.rs`, which now include scenarios for structured outputs and tool calling (both valid and invalid responses).
 
 ## Implementation Plan
 
-The project is still under active development. Below is an implementation roadmap outlining the upcoming features and milestones.
+The project is under active development. The following roadmap outlines upcoming features and milestones:
 
 ### Phase 1: Core Functionality (Completed or In Progress)
 - [x] **Client Foundation:**
@@ -114,36 +171,39 @@ The project is still under active development. Below is an implementation roadma
 
 ### Phase 2: Additional Endpoints and Features
 - [ ] **Streaming Support:**
-  - Implement streaming versions of the chat completions (e.g., `create_chat_completion_stream` using Server-Sent Events).
+  - Implement streaming versions of the chat completions using Server-Sent Events.
 - [ ] **Text Completion Endpoint:**
   - Create an API module and associated types for text completions.
 - [ ] **Models & Credits Endpoints:**
-  - Implement endpoints to list available models and retrieve credits information.
-- [ ] **Tool Calling & Structured Outputs:**
-  - Add support for tool calls and structured responses, using JSON Schema validation.
+  - Implement endpoints to list available models and retrieve credit information.
+- [x] **Tool Calling & Structured Outputs:**
+  - Add support for tool calls, allowing the specification of callable functions.
+  - Enable structured responses with JSON Schema validation and fallback behavior.
 - [ ] **Provider Preferences & Model Routing:**
-  - Enable specification of provider preferences, fallbacks, and routing options.
+  - Enable configuration for provider preferences, fallbacks, and routing options.
 
 ### Phase 3: Robust Testing & Documentation
 - [ ] **Unit & Integration Tests:**
   - Expand test coverage with mocks and integration tests for each endpoint.
 - [ ] **Documentation Improvements:**
-  - Enhance inline documentation and generate API docs using rustdoc.
-  - Provide usage examples in the `examples/` directory.
+  - Enhance inline documentation and API docs using rustdoc.
+  - Provide additional usage examples in the `examples/` directory.
 - [ ] **Continuous Integration (CI):**
-  - Set up CI pipeline for automated builds and tests.
+  - Set up a CI pipeline for continuous builds and testing.
 
 ## Contributing
 
-Contributions are welcome! If you have ideas or improvements, please open an issue or submit a pull request. Please adhere to the code style and ensure tests pass.
+Contributions are welcome! Please open an issue or submit a pull request with your ideas or improvements. When contributing, follow the code style guidelines and ensure that all tests pass.
 
 ## License
 
-Distributed under either the MIT license or the Apache License, Version 2.0. See [LICENSE](LICENSE) for more information.
+Distributed under either the MIT license or the Apache License, Version 2.0. See [LICENSE](LICENSE) for more details.
 
 –––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-
-
-
-## Verbose output for debugging
+## Debugging and Verbose Test Output
+For detailed logging during tests, you can run:
+```bash
 cargo test -- --nocapture
+```
+
+-------------------------------------------------
