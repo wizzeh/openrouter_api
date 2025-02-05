@@ -23,7 +23,7 @@ async fn test_basic_chat_completion() -> Result<()> {
         model: "openai/gpt-4o".to_string(),
         messages: vec![Message {
             role: "user".to_string(),
-            content: "Say hello!".to_string(),
+            content: "What is a phantom type in Rust?".to_string(),
             name: None,
         }],
         stream: None,
