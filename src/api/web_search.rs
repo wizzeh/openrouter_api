@@ -37,7 +37,7 @@ impl WebSearchApi {
         let response = self
             .client
             .post(url)
-            .headers(self.config.build_headers())
+            .headers(self.config.build_headers()?)
             .json(&request)
             .send()
             .await?;

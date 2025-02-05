@@ -1,3 +1,5 @@
+// openrouter_api/src/client.rs
+
 use crate::error::{Error, Result};
 #[allow(unused_imports)]
 use crate::types;
@@ -18,23 +20,27 @@ pub struct ClientConfig {
 
 impl ClientConfig {
     /// Build HTTP headers required for making API calls.
-    pub fn build_headers(&self) -> HeaderMap {
+    /// Returns an error if any header value cannot be constructed.
+    pub fn build_headers(&self) -> Result<HeaderMap> {
         let mut headers = HeaderMap::new();
         if let Some(ref key) = self.api_key {
-            headers.insert(
-                AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {}", key))
-                    .expect("Invalid API key header format"),
-            );
+            let auth_header = HeaderValue::from_str(&format!("Bearer {}", key))
+                .map_err(|e| Error::ConfigError(format!("Invalid API key header format: {}", e)))?;
+            headers.insert(AUTHORIZATION, auth_header);
         }
+        // Content-Type header is always valid.
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         if let Some(ref referer) = self.http_referer {
-            headers.insert("Referer", HeaderValue::from_str(referer).unwrap());
+            let ref_value = HeaderValue::from_str(referer)
+                .map_err(|e| Error::ConfigError(format!("Invalid Referer header: {}", e)))?;
+            headers.insert("Referer", ref_value);
         }
         if let Some(ref title) = self.site_title {
-            headers.insert("X-Title", HeaderValue::from_str(title).unwrap());
+            let title_value = HeaderValue::from_str(title)
+                .map_err(|e| Error::ConfigError(format!("Invalid Title header: {}", e)))?;
+            headers.insert("X-Title", title_value);
         }
-        headers
+        Ok(headers)
     }
 }
 
@@ -92,7 +98,7 @@ impl OpenRouterClient<Unconfigured> {
 
 impl OpenRouterClient<NoAuth> {
     /// Supplies the API key and transitions to the Ready state.
-    pub fn with_api_key(mut self, api_key: impl Into<String>) -> OpenRouterClient<Ready> {
+    pub fn with_api_key(mut self, api_key: impl Into<String>) -> Result<OpenRouterClient<Ready>> {
         self.config.api_key = Some(api_key.into());
         self.transition_to_ready()
     }
@@ -115,24 +121,30 @@ impl OpenRouterClient<NoAuth> {
         self
     }
 
-    fn transition_to_ready(self) -> OpenRouterClient<Ready> {
+    fn transition_to_ready(self) -> Result<OpenRouterClient<Ready>> {
+        let headers = self.config.build_headers()?;
         let http_client = reqwest::Client::builder()
             .timeout(self.config.timeout)
-            .default_headers(self.config.build_headers())
+            .default_headers(headers)
             .build()
-            .expect("Failed to create HTTP client");
-        OpenRouterClient {
+            .map_err(|e| Error::ConfigError(format!("Failed to create HTTP client: {}", e)))?;
+        Ok(OpenRouterClient {
             config: self.config,
             http_client: Some(http_client),
             _state: PhantomData,
-        }
+        })
     }
 }
 
 impl OpenRouterClient<Ready> {
     /// Provides access to the chat endpoint.
-    pub fn chat(&self) -> crate::api::chat::ChatApi {
-        crate::api::chat::ChatApi::new(self.http_client.clone().unwrap(), &self.config)
+    /// Returns an error if the HTTP client is missing.
+    pub fn chat(&self) -> Result<crate::api::chat::ChatApi> {
+        let client = self
+            .http_client
+            .clone()
+            .ok_or_else(|| Error::ConfigError("HTTP client is missing".into()))?;
+        Ok(crate::api::chat::ChatApi::new(client, &self.config))
     }
 
     /// Returns a new request builder for the completions endpoint.
@@ -145,8 +157,16 @@ impl OpenRouterClient<Ready> {
     }
 
     /// Provides access to the web search endpoint.
-    pub fn web_search(&self) -> crate::api::web_search::WebSearchApi {
-        crate::api::web_search::WebSearchApi::new(self.http_client.clone().unwrap(), &self.config)
+    /// Returns an error if the HTTP client is missing.
+    pub fn web_search(&self) -> Result<crate::api::web_search::WebSearchApi> {
+        let client = self
+            .http_client
+            .clone()
+            .ok_or_else(|| Error::ConfigError("HTTP client is missing".into()))?;
+        Ok(crate::api::web_search::WebSearchApi::new(
+            client,
+            &self.config,
+        ))
     }
 
     /// Example chat completion method.
@@ -165,12 +185,14 @@ impl OpenRouterClient<Ready> {
                 metadata: None,
             })?;
 
-        let response = self
+        let client = self
             .http_client
             .as_ref()
-            .unwrap()
+            .ok_or_else(|| Error::ConfigError("HTTP client is missing".into()))?;
+
+        let response = client
             .post(url)
-            .headers(self.config.build_headers())
+            .headers(self.config.build_headers()?)
             .json(&request)
             .send()
             .await?;
