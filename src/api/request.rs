@@ -1,6 +1,15 @@
-use crate::models::chat::ChatMessage;
+/*
+   src/api/request.rs
+
+   This module implements the unified request builder for non‑interactive endpoints,
+   supporting structured outputs and tool calling.
+*/
+
 use crate::models::structured::JsonSchemaConfig;
+use crate::models::tool::Tool;
+use crate::types::chat::Message;
 use serde::Serialize;
+use serde_json::Value;
 
 /// Representation for enabling structured outputs in the request payload.
 #[derive(Debug, Clone, Serialize)]
@@ -18,19 +27,25 @@ pub struct ResponseFormatConfig {
 #[serde(rename_all = "camelCase")]
 pub struct RequestPayload<T: Serialize> {
     pub model: String,
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<Message>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<ResponseFormatConfig>,
+    /// Optional tool calling instructions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<Tool>>,
     #[serde(flatten)]
     pub extra_params: T,
 }
 
-/// A unified request builder for non‑interactive endpoints supporting structured outputs.
+/// A unified request builder for non‑interactive endpoints supporting structured outputs
+/// and tool calling.
 pub struct RequestBuilder<T: Serialize> {
     model: String,
-    messages: Vec<ChatMessage>,
+    messages: Vec<Message>,
     extra_params: T,
     structured_output: Option<ResponseFormatConfig>,
+    /// Optional tools for tool calling.
+    tools: Option<Vec<Tool>>,
     /// Indicates whether to perform JSON Schema validation on the response.
     pub validate_structured: bool,
     /// If true, fallback to unstructured output on validation failure.
@@ -39,12 +54,13 @@ pub struct RequestBuilder<T: Serialize> {
 
 impl<T: Serialize> RequestBuilder<T> {
     /// Creates a new request builder.
-    pub fn new(model: impl Into<String>, messages: Vec<ChatMessage>, extra_params: T) -> Self {
+    pub fn new(model: impl Into<String>, messages: Vec<Message>, extra_params: T) -> Self {
         Self {
             model: model.into(),
             messages,
             extra_params,
             structured_output: None,
+            tools: None,
             validate_structured: true,
             fallback_on_failure: false,
         }
@@ -68,12 +84,19 @@ impl<T: Serialize> RequestBuilder<T> {
         self
     }
 
+    /// Enables tool calling by providing a list of tools.
+    pub fn with_tools(mut self, tools: Vec<Tool>) -> Self {
+        self.tools = Some(tools);
+        self
+    }
+
     /// Consumes the builder and returns the complete request payload.
     pub fn build(self) -> RequestPayload<T> {
         RequestPayload {
             model: self.model,
             messages: self.messages,
             response_format: self.structured_output,
+            tools: self.tools,
             extra_params: self.extra_params,
         }
     }

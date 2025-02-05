@@ -138,7 +138,7 @@ impl OpenRouterClient<Ready> {
     /// Extra parameters are provided as a generic JSON object.
     pub fn completion_request(
         &self,
-        messages: Vec<crate::models::chat::ChatMessage>,
+        messages: Vec<crate::types::chat::Message>,
     ) -> crate::api::request::RequestBuilder<serde_json::Value> {
         let extra_params = serde_json::json!({});
         crate::api::request::RequestBuilder::new("openai/gpt-4", messages, extra_params)
@@ -177,7 +177,11 @@ impl OpenRouterClient<Ready> {
                 metadata: None,
             });
         }
-        self.handle_response(response).await
+        let chat_response: crate::types::chat::ChatCompletionResponse =
+            self.handle_response(response).await?;
+        // Validate any tool calls in the response.
+        self.validate_tool_calls(&chat_response)?;
+        Ok(chat_response)
     }
 
     /// Handles the response by deserializing JSON.
@@ -206,5 +210,26 @@ impl OpenRouterClient<Ready> {
             message: format!("Failed to decode JSON: {}. Body was: {}", e, body),
             metadata: None,
         })
+    }
+
+    /// Validates any tool calls in a ChatCompletionResponse.
+    /// Each tool call must have its "kind" value equal to "function".
+    pub fn validate_tool_calls(
+        &self,
+        response: &crate::types::chat::ChatCompletionResponse,
+    ) -> Result<()> {
+        for choice in &response.choices {
+            if let Some(tool_calls) = &choice.message.tool_calls {
+                for tc in tool_calls {
+                    if tc.kind != "function" {
+                        return Err(Error::SchemaValidationError(format!(
+                            "Invalid tool call kind: {}. Expected 'function'",
+                            tc.kind
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }

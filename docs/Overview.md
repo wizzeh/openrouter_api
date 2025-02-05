@@ -213,3 +213,32 @@ With the new structured outputs support, clients can now request responses that 
 This document provides an overview of the directory structure, design decisions, and our phased implementation plan. As the project evolves, additional endpoints and features will be introduced following this modular and test‑driven design.
 
 ---
+
+
+1. Response JSON Schema Validation – Currently, the client builds requests with the structured output parameters, but we still need to validate the response against the provided schema. That means:
+ • When a response is received for a request with a structured output configuration, you should use the jsonschema crate to asynchronously validate that JSON against the client‑provided schema.
+ • If validation fails, decide whether to return an error (using SchemaValidationError) or—if fallback is enabled—return the unstructured response.
+ • Update the response handling logic (e.g. in the completions call) to include this validation step.
+
+2. Fallback Handling – If you choose to support fallback behavior:
+ • Implement logic to check if validation fails and fallback_on_failure is true. Then, bypass the structured validation error and return the raw or an unstructured response.
+ • Document the behavior clearly so that consumers know what to expect.
+
+3. Update Documentation – Be sure that the README and documentation (including API docs and examples) reflect:
+ • How to enable structured outputs in the request builder.
+ • What JSON Schema configuration looks like.
+ • How the client validates the response and handles errors/fallback.
+ • Any limitations (for example, streaming mode is not supported with structured outputs).
+
+4. Additional Tests – Beyond the integration test that prints the built payload:
+ • Write tests that simulate receiving both valid and invalid JSON responses from the API.
+ • Verify that the validation logic works as expected (i.e. when the schema matches and when it does not).
+ • Test fallback behavior if that option is enabled.
+
+5. Error Reporting and Logging – Enhance error messages (especially for SchemaValidationError) so that the user gets clear details on what part of the schema didn’t validate.
+
+6. Future-proof Considerations – If you plan to eventually support structured output for more endpoints (or even for streaming, if that becomes viable):
+ • Consider refactoring the response handling into a dedicated module.
+ • Create unit tests for the JSON Schema validation logic itself.
+
+Once these steps are complete, your support for structured outputs will be fully integrated, robustly validated, and well documented—all crucial pieces for production‑ready functionality.

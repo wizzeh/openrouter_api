@@ -1,12 +1,25 @@
+use crate::models::tool::ToolCall;
 use serde::{Deserialize, Serialize};
 
-/// A chat message for a chat completion request.
-#[derive(Debug, Serialize, Deserialize)]
+/// Defines the role of a chat message (user, assistant, or system).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatRole {
+    User,
+    Assistant,
+    System,
+}
+
+/// Represents a chat message with a role and content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: String,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    // Optionally include tool_calls when the assistant message contains a tool call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
 }
 
 /// Chat completion request matching the OpenRouter API schema.
@@ -22,9 +35,9 @@ pub struct ChatCompletionRequest {
     /// (Optional) Stub for response_format.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<String>,
-    /// (Optional) Stub for tools.
+    /// (Optional) Tool calling field. Now uses our production‑ready tool types.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<String>>,
+    pub tools: Option<Vec<crate::models::tool::Tool>>,
     /// (Optional) Stub for provider preferences.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,

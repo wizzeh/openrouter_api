@@ -24,7 +24,7 @@ impl ChatApi {
     /// Example method for chat completion that returns a complete response.
     pub async fn chat_completion(
         &self,
-        request: ChatCompletionRequest,
+        _request: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
         // Here you would implement your chat completion logic using self.client.
         // For now, we leave it unimplemented.
@@ -34,7 +34,7 @@ impl ChatApi {
     /// Example method that returns a stream of chat completion chunks.
     pub fn chat_completion_stream(
         &self,
-        request: ChatCompletionRequest,
+        _request: ChatCompletionRequest,
     ) -> impl Stream<Item = Result<ChatCompletionChunk>> {
         // Implement a streaming version. For now we return an empty stream.
         futures::stream::empty()
