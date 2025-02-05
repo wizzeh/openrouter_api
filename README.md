@@ -1,25 +1,25 @@
-------------------------------------------------
 # OpenRouter API Client Library
 
 OpenRouter API Client Library is a Rust client for interfacing with the OpenRouter API. The library is designed to be modular, type‑safe, and intuitive. It uses a type‑state builder pattern for configuring and validating the client at compile time, ensuring that all required configuration (such as setting the base URL and API key) happens before attempting a request.
 
-> **Note:** This project is still in development. Many features are planned but not yet implemented.
+> **Note:** This project is still in development. Many features are planned but not yet fully implemented.
 
 ## Features
 
-- **Modular Organization:** The code is organized into clear modules for models, API endpoints, common types, and utilities.
-- **Type‑State Builder:** Guarantees compile‑time validation of client configuration for a robust development experience.
+- **Modular Organization:** Organized into clear modules for models, API endpoints, common types, and utilities.
+- **Type‑State Builder:** Guarantees compile‑time validation of client configuration (e.g. base URL, API key, custom headers) for a robust development experience.
 - **HTTP Integration:** Uses [reqwest](https://crates.io/crates/reqwest) with rustls‑tls for secure asynchronous HTTP requests.
 - **Robust Error Handling:** Centralized error management using the `thiserror` crate ensures consistent error types across the library.
-- **Structured Outputs:** Optionally request structured responses and enable JSON Schema validation using user‑provided schemas. This helps enforce consistent, type‑safe response formats.
-- **Tool Calling Capability:** Define function‑type tools that the model can invoke. The client supports multiple concurrent tool calls per response and validates that each tool call conforms to the expected format.
-- **Provider Preferences & Routing:** Configure model fallbacks, routing preferences, and provider filtering via a new strongly‑typed interface.
-- **Web Search Endpoint:** A new endpoint to perform web search queries. It accepts a minimal request structure (query and an optional number of results) and returns a structured set of search results.
+- **Streaming Support:** Now supports streaming chat completions via Server-Sent Events (SSE). The library gracefully skips over comment lines and non‑JSON payloads, letting you update UIs in real‑time.
+- **Structured Outputs:** Optionally request structured responses with JSON Schema validation so that responses strictly follow your defined schema.
+- **Tool Calling Capability:** Define function‑type tools that the model can invoke. Supports concurrent tool calls in a single response with proper validation against expected formats.
+- **Provider Preferences & Routing:** Configure model fallbacks, routing preferences, and provider filtering via a strongly‑typed interface.
+- **Web Search Endpoint:** Easily perform web search queries with type‑safe request and response models.
 - **Future Roadmap:**
-  - Streaming support for real‑time completions.
+  - Full Streaming support for real‑time chat completions (currently available for chat yet to be fully integrated in all endpoints).
   - Text completion endpoint.
   - Endpoints for credits, generation metadata, and available models.
-  - Extended tests and documentation improvements.
+  - Extended tests, enhanced documentation, and CI integration.
 
 ## Getting Started
 
@@ -36,9 +36,9 @@ Ensure that you have Rust installed (tested with Rust v1.83.0) and that you're u
 
 ### Example Usage
 
-Minimal Chat Example
+#### Minimal Chat Example
 
-------------------------------------------------
+```rust
 use openrouter_api::{OpenRouterClient, Ready, Result};
 use openrouter_api::types::chat::{ChatCompletionRequest, Message};
 
@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
     // Build the client (Unconfigured -> NoAuth -> Ready).
     let client = OpenRouterClient::new()
         .with_base_url("https://openrouter.ai/api/v1/")?
-        .with_api_key(api_key);
+        .with_api_key(api_key)?;
 
     // Create a minimal chat completion request.
     let request = ChatCompletionRequest {
@@ -79,10 +79,9 @@ async fn main() -> Result<()> {
     }
     Ok(())
 }
+```
 
-------------------------------------------------
-
-Below is a minimal example that demonstrates how to use the new Web Search endpoint.
+#### Minimal Web Search Example
 
 ```rust
 use openrouter_api::{OpenRouterClient, Ready, Result};
@@ -90,14 +89,14 @@ use openrouter_api::types::web_search::{WebSearchRequest, WebSearchResponse};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Ensure you have set your API key in the environment.
+    // Ensure your API key is set in the environment.
     let api_key = std::env::var("OPENROUTER_API_KEY")
         .expect("OPENROUTER_API_KEY must be set");
 
     // Build the client (Unconfigured -> NoAuth -> Ready).
     let client = OpenRouterClient::new()
         .with_base_url("https://openrouter.ai/api/v1/")?
-        .with_api_key(api_key);
+        .with_api_key(api_key)?;
 
     // Create a minimal web search request.
     let request = WebSearchRequest {
@@ -106,7 +105,7 @@ async fn main() -> Result<()> {
     };
 
     // Invoke the web search endpoint.
-    let response: WebSearchResponse = client.web_search().search(request).await?;
+    let response: WebSearchResponse = client.web_search()?.search(request).await?;
 
     // Print out the search results.
     println!("Search query: {}", response.query);
@@ -118,183 +117,214 @@ async fn main() -> Result<()> {
 }
 ```
 
-Below is a more complete example that creates a client, configures it with the API key, sends a chat completion request with structured output enabled, and demonstrates tool calling capabilities:
+#### Streaming Chat Example
+
+The library now supports streaming chat completions via SSE:
 
 ```rust
-use openrouter_api::{
-    OpenRouterClient, Ready,
-    types::chat::{ChatCompletionRequest, Message},
-    Result,
-};
-use openrouter_api::models::structured::{JsonSchemaConfig, JsonSchemaDefinition};
-use openrouter_api::models::tool::{Tool, FunctionDescription};
-use serde_json::json;
+use openrouter_api::{OpenRouterClient, Ready, Result};
+use openrouter_api::types::chat::{ChatCompletionRequest, Message, ChatCompletionChunk};
+use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Make sure to set your API key in an environment variable.
+    // Ensure your API key is set in the environment.
     let api_key = std::env::var("OPENROUTER_API_KEY")
         .expect("OPENROUTER_API_KEY must be set");
 
-    // Create an OpenRouter client.
+    // Build the client.
     let client = OpenRouterClient::new()
-        // The base URL must have a trailing slash.
         .with_base_url("https://openrouter.ai/api/v1/")?
-        .with_http_referer("https://yourwebsite.com")
-        .with_site_title("Your Application")
-        .with_api_key(api_key);
+        .with_api_key(api_key)?;
 
-    // Create a chat completion request using an available model.
+    // Create a chat completion request with streaming enabled.
     let request = ChatCompletionRequest {
         model: "openai/gpt-4o".to_string(),
-        messages: vec![
-            Message {
-                role: "user".to_string(),
-                content: "What is the meaning of life?".to_string(),
-                name: None,
-                tool_calls: None,
-            }
-        ],
-        stream: None,
+        messages: vec![Message {
+            role: "user".to_string(),
+            content: "Tell me a story.".to_string(),
+            name: None,
+            tool_calls: None,
+        }],
+        stream: Some(true),
         response_format: None,
-        // Optionally, provide a list of tools the model may call.
-        tools: Some(vec![
-            Tool::Function {
-                function: FunctionDescription {
-                    name: "get_current_weather".into(),
-                    description: Some("Retrieve the current weather for a specified location".into()),
-                    parameters: json!({
-                        "type": "object",
-                        "properties": {
-                            "location": { "type": "string", "description": "City or location name" }
-                        },
-                        "required": ["location"]
-                    }),
-                }
-            }
-        ]),
+        tools: None,
         provider: None,
         models: None,
         transforms: None,
     };
 
-    // Alternatively, if using the unified request builder, you can enable structured outputs:
+    // Invoke the streaming chat completion endpoint.
+    let mut stream = client.chat()?.chat_completion_stream(request);
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(c) => {
+                // Incrementally output the content.
+                print!("{}", c.message.content);
+            }
+            Err(e) => eprintln!("Error during streaming: {}", e),
+        }
+    }
+    println!();
+    Ok(())
+}
+```
+
+#### Tool Calling & Structured Outputs Example
+
+This example demonstrates how to include tool calling information and request structured output validation using a JSON Schema.
+
+```rust
+use openrouter_api::{
+    OpenRouterClient, Ready,
+    types::chat::{ChatCompletionRequest, Message},
+    models::structured::{JsonSchemaConfig, JsonSchemaDefinition},
+    models::tool::{Tool, FunctionDescription},
+    Result,
+};
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Ensure your API key is set.
+    let api_key = std::env::var("OPENROUTER_API_KEY")
+        .expect("OPENROUTER_API_KEY must be set");
+
+    // Build the client.
+    let client = OpenRouterClient::new()
+        .with_base_url("https://openrouter.ai/api/v1/")?
+        .with_api_key(api_key)?;
+
+    // Define a tool the model can call.
+    let weather_tool = Tool::Function {
+        function: FunctionDescription {
+            name: "get_current_weather".to_owned(),
+            description: Some("Retrieve current weather for a given location".to_owned()),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "Name of the city or location"
+                    }
+                },
+                "required": ["location"]
+            }),
+        },
+    };
+
+    // Define a JSON Schema for structured output.
     let schema_def = JsonSchemaDefinition {
-        schema_type: "object".into(),
+        schema_type: "object".to_owned(),
         properties: {
             let mut map = serde_json::Map::new();
-            map.insert(
-                "result".into(),
-                json!({ "type": "string", "description": "The answer to the query" }),
-            );
+            map.insert("result".to_owned(), json!({
+                "type": "string",
+                "description": "The answer generated by the model"
+            }));
             map
         },
-        required: Some(vec!["result".into()]),
+        required: Some(vec!["result".to_owned()]),
         additional_properties: Some(false),
     };
 
     let json_schema_config = JsonSchemaConfig {
-        name: "answer".into(),
+        name: "answer".to_owned(),
         strict: true,
         schema: schema_def,
     };
 
-    // Build request payload using the unified builder with structured output enabled.
+    // Create a chat completion request with tool calling and structured output.
+    let request = ChatCompletionRequest {
+        model: "openai/gpt-4o".to_string(),
+        messages: vec![Message {
+            role: "user".to_string(),
+            content: "What is the meaning of life?".to_string(),
+            name: None,
+            tool_calls: None,
+        }],
+        stream: None,
+        response_format: Some("json_schema".to_string()),
+        // Attach the tool.
+        tools: Some(vec![weather_tool]),
+        // Other optional fields.
+        provider: None,
+        models: None,
+        transforms: None,
+    };
+
+    // Build the request payload using the unified request builder (which supports structured outputs).
     let request_payload = client
-        .completion_request(vec![
-            Message {
-                role: "user".to_string(),
-                content: "What is the meaning of life?".to_string(),
-                name: None,
-                tool_calls: None,
-            }
-        ])
+        .completion_request(vec![Message {
+            role: "user".to_string(),
+            content: "What is the meaning of life?".to_string(),
+            name: None,
+            tool_calls: None,
+        }])
         .with_structured_output(json_schema_config, true, false)
         .build();
 
-    println!("Structured Request payload:\n{}", serde_json::to_string_pretty(&request_payload)?);
+    println!("Structured Request Payload:\n{}", serde_json::to_string_pretty(&request_payload)?);
 
     // Invoke the chat completion endpoint.
     let response = client.chat_completion(request).await?;
-
-    println!("Model used: {}", response.model);
+    println!("Response Model: {}", response.model);
     if let Some(choice) = response.choices.first() {
         println!("Response: {}", choice.message.content);
     }
-    println!("Usage: {:?}", response.usage);
 
     Ok(())
 }
 ```
 
-
-
 ### Running Tests
 
-Before running tests, set the environment variable `OPENROUTER_API_KEY` with your API key:
-
+Before running tests, set the `OPENROUTER_API_KEY` environment variable to your API key:
 ```bash
 export OPENROUTER_API_KEY=sk-...
 cargo test
 ```
-
-This will run the integration tests in `tests/integration_tests.rs`, which now include scenarios for structured outputs, tool calling, provider preferences, and the new web search endpoint.
-
-## Implementation Plan
-
-The project is under active development. The following roadmap outlines upcoming features and milestones:
-
-### Phase 1: Core Functionality (Completed or In Progress)
-- [x] **Client Foundation:**
-  - Implement the type‑state builder for configuration.
-  - Validate required parameters at compile time.
-  - Build a basic HTTP client with custom headers.
-- [x] **Chat Completion Endpoint:**
-  - Implement the `chat_completion` method using the correct URL joining logic.
-  - Provide basic error handling (e.g., decoding response JSON).
-- [x] **Core Data Models:**
-  - Implement types for chat messages, requests, responses, and usage.
-
-### Phase 2: Additional Endpoints and Features
-- [ ] **Streaming Support:**
-  - Implement streaming versions of the chat completions using Server-Sent Events.
-- [ ] **Text Completion Endpoint:**
-  - Create an API module and associated types for text completions.
-- [ ] **Models & Credits Endpoints:**
-  - Implement endpoints to list available models and retrieve credit information.
-- [x] **Tool Calling & Structured Outputs:**
-  - Add support for tool calls, allowing the specification of callable functions.
-  - Enable structured responses with JSON Schema validation and fallback behavior.
-- [x] **Provider Preferences & Model Routing:**
-  - Enable configuration for provider preferences, fallbacks, and routing options.
-- [x] **Web Search Endpoint:**
-  - Implement a new endpoint for web search queries.
-  - Define strongly‑typed request and response models for search operations.
-
-### Phase 3: Robust Testing & Documentation
-- [ ] **Unit & Integration Tests:**
-  - Expand test coverage with mocks and integration tests for each endpoint.
-- [ ] **Documentation Improvements:**
-  - Enhance inline documentation and API docs using rustdoc.
-  - Provide additional usage examples in the `examples/` directory.
-- [ ] **Continuous Integration (CI):**
-  - Set up a CI pipeline for continuous builds and testing.
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request with your ideas or improvements. When contributing, follow the code style guidelines and ensure that all tests pass.
-
-## License
-
-Distributed under either the MIT license or the Apache License, Version 2.0. See [LICENSE](LICENSE) for more details.
-
-–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-## Debugging and Verbose Test Output
-
-For detailed logging during tests, you can run:
-
+For verbose output:
 ```bash
 cargo test -- --nocapture
 ```
 
-------------------------------------------------
+## Implementation Plan
+
+The project is under active development. The roadmap outlines upcoming features and milestones:
+
+### Phase 1: Core Functionality (Completed/In Progress)
+- [x] **Client Framework:**
+  - Type‑state builder pattern for configuration with compile‑time validations.
+  - Custom headers and robust error propagation.
+- [x] **Chat Completion Endpoint:**
+  - Synchronous chat completions with JSON decoding and streaming support.
+- [x] **Core Data Models:**
+  - Definitions for chat messages, requests, responses, and usage.
+
+### Phase 2: Additional Endpoints and Features
+- [x] **Streaming Support:**
+  - Streaming API for chat completions via Server‑Sent Events (SSE).
+- [x] **Web Search Endpoint:**
+  - New endpoint for web search queries with strongly‑typed request/response models.
+- [x] **Tool Calling & Structured Outputs:**
+  - Support for invoking callable functions and validating structured responses via JSON Schema.
+- [x] **Provider Preferences & Routing:**
+  - Configuration options for model fallbacks, routing, and provider filtering.
+
+### Phase 3: Robust Testing & Documentation
+- [ ] **Test Coverage:**
+  - Expand unit and integration tests, including streaming-specific tests.
+- [ ] **Documentation Improvements:**
+  - Enhance inline documentation, API docs, and usage examples in the `/examples` directory.
+- [ ] **Continuous Integration (CI):**
+  - Set up CI pipelines for automated builds and tests.
+
+## Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request with your ideas or fixes. Follow the code style guidelines and ensure that all tests pass.
+
+## License
+
+Distributed under either the MIT license or the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
