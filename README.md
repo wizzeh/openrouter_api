@@ -247,6 +247,3 @@ Contributions are welcome! Please open an issue or submit a pull request with yo
 ## License
 
 Distributed under either the MIT license or the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
-```
-
-These updates now explicitly mention the new text completion endpoint (including its required fields and flexible extra parameters), along with instructions and examples to help users integrate it into their applications.
