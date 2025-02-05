@@ -1,273 +1,211 @@
-OpenRouter API library that matches the documentation and follows Rust best practices. Here's the recommended structure with descriptions:
+-------------------------------------------------
+docs/Overview.md
+-------------------------------------------------
+
+# OpenRouter API Client Library Overview
+
+This project is a Rust client library for the OpenRouter API that matches the documentation and follows Rust best practices. It is designed to be modular, maintainable, and type‑safe; it uses a type‑state builder pattern for client configuration so that required settings (such as the base URL and API key) are enforced at compile time.
+
+> **Note:** This project is still in active development. Many features are planned and under iterative improvement.
+
+---
+
+## Project Directory Structure
+
+The project is organized as follows:
 
 ```
 openrouter_api/
 ├── src/
 │   ├── lib.rs                 # Library root, public exports, and high-level documentation
-│   ├── client.rs              # OpenRouter client implementation
-│   ├── config.rs              # Client configuration and builder
-│   ├── models/                # Data models and types
-│   │   ├── mod.rs            # Models module exports
-│   │   ├── chat.rs           # Chat completion types
+│   ├── client.rs              # OpenRouter client implementation and type‑state builder
+│   ├── config.rs              # (Future) Dedicated client configuration module (currently merged into client.rs)
+│   ├── models/                # Data models and types for API endpoints
+│   │   ├── mod.rs             # Exports for models
+│   │   ├── chat.rs            # Chat completion types
 │   │   ├── completion.rs      # Text completion types
-│   │   ├── common.rs         # Shared types between different endpoints
-│   │   ├── error.rs          # Error types and conversions
-│   │   └── parameters.rs      # LLM parameter types
+│   │   ├── common.rs          # Shared types used across endpoints
+│   │   ├── error.rs           # API error types and conversions
+│   │   └── parameters.rs      # LLM parameter types (stub for now)
 │   ├── api/                   # API endpoint implementations
-│   │   ├── mod.rs            # API module exports
-│   │   ├── chat.rs           # Chat completion endpoint
-│   │   ├── completion.rs      # Text completion endpoint
-│   │   ├── generation.rs      # Generation metadata endpoint
-│   │   ├── models.rs         # Available models endpoint
-│   │   └── credits.rs        # Credits information endpoint
-│   ├── types/                 # Shared type definitions
-│   │   ├── mod.rs            # Types module exports
-│   │   ├── provider.rs       # Provider-related types
-│   │   ├── routing.rs        # Routing preference types
-│   │   └── transform.rs      # Message transform types
+│   │   ├── mod.rs             # Exports for API implementations
+│   │   ├── chat.rs            # Chat completion endpoint implementation
+│   │   ├── completion.rs      # Text completion endpoint implementation
+│   │   ├── generation.rs      # Generation metadata endpoint implementation
+│   │   ├── models.rs          # Models listing endpoint implementation
+│   │   └── credits.rs         # Credits information endpoint implementation
+│   ├── types/                 # Shared type definitions (and stubs)
+│   │   ├── mod.rs             # Exports for shared types
+│   │   ├── provider.rs        # Provider-related types (stub)
+│   │   ├── routing.rs         # Routing preference types (stub)
+│   │   └── transform.rs       # Message transform types (stub)
 │   └── utils/                 # Utility functions
-│       ├── mod.rs            # Utils module exports
-│       ├── http.rs           # HTTP-related utilities
-│       ├── auth.rs           # Authentication utilities
-│       └── validation.rs     # Input validation utilities
+│       ├── mod.rs             # Exports for utilities
+│       ├── http.rs            # HTTP-related utility functions
+│       ├── auth.rs            # Authentication utilities (if needed)
+│       └── validation.rs      # Input validation utilities
 ├── tests/                     # Integration tests
-│   ├── common/               # Shared test utilities
-│   │   ├── mod.rs           # Test utils exports
-│   │   └── mock_server.rs   # Mock server for testing
-│   ├── chat_tests.rs         # Chat completion tests
-│   ├── completion_tests.rs   # Text completion tests
+│   ├── common/               # Shared test utilities (for mocking, etc.)
+│   │   ├── mod.rs             # Exports for test utilities
+│   │   └── mock_server.rs     # Mock server for testing (to be added later)
+│   ├── chat_tests.rs         # Chat completion endpoint tests
+│   ├── completion_tests.rs   # Text completion endpoint tests
 │   └── integration_tests.rs  # Full integration tests
-├── examples/                  # Usage examples
-│   ├── chat.rs              # Chat completion example
+├── examples/                  # Usage examples and sample applications
+│   ├── chat.rs              # Simple chat completion example
 │   ├── completion.rs        # Text completion example
 │   └── streaming.rs         # Streaming example
-├── Cargo.toml                # Package manifest
-├── README.md                 # Library documentation
-├── CHANGELOG.md             # Version history
-└── LICENSE                  # License information
+├── Cargo.toml                # Package manifest and dependencies
+├── README.md                 # High-level documentation and usage instructions
+├── CHANGELOG.md              # Version history and release notes
+└── LICENSE                   # License information (MIT or Apache-2.0)
 ```
 
-Key design considerations:
+---
 
-1. **Modular Organization**: Each major feature has its own module, making the code easier to maintain and test.
+## Key Design Considerations
 
-2. **Clear Separation of Concerns**:
-   - `models/` contains all data structures
-   - `api/` handles endpoint implementations
-   - `types/` contains shared type definitions
-   - `utils/` contains reusable utilities
+1. **Modular Organization:**
+   - **Models:** Contains all data structures and types representing API request/response schemas.
+   - **API Modules:** Each API endpoint (chat, completions, etc.) is implemented in its own module.
+   - **Types:** Common and shared types are defined separately to help reduce duplication.
+   - **Utils:** Helper functions (HTTP, authentication, validation) are isolated.
 
-3. **Testing Structure**:
-   - Integration tests are separated from unit tests
-   - Mock server utilities for consistent testing
-   - Common test utilities are shared
+2. **Clear Separation of Concerns:**
+   The library separates endpoint implementations, data structures, and client configuration, improving maintainability and testability.
 
-4. **Documentation**:
-   - Examples directory for usage demonstrations
-   - Comprehensive README and CHANGELOG
-   - In-code documentation follows rustdoc standards
+3. **Testing Structure:**
+   - Integration tests are located in the `tests/` directory to ensure proper end-to-end behavior.
+   - (Future) Advanced mock tests may be added in `tests/common/`.
 
-5. **Error Handling**:
-   - Centralized error types in `models/error.rs`
-   - Consistent error handling across all modules
+4. **Documentation:**
+   - The `examples/` directory includes sample usage for developers.
+   - Inline Rust documentation (rustdoc) is provided throughout for clarity.
+   - A CHANGELOG and LICENSE file are maintained.
 
-This structure supports all the features mentioned in the documentation, including:
-- Chat and completion endpoints
-- Model routing
-- Provider preferences
-- Streaming support
-- Tool calls
-- Structured outputs
-- Message transforms
-- Authentication
-- Error handling
+5. **Robust Error Handling:**
+   All errors are centralized in the `models/error.rs` module (and re-exported via `src/error.rs`). The library uses the `thiserror` crate to partition HTTP errors, API errors, configuration errors, and more.
 
-Each module will be properly documented with Rust doc comments and will include appropriate unit tests alongside the implementation.
+---
 
-the architecture for a type-state builder pattern implementation for the OpenRouter client. This design ensures compile-time guarantees for required configurations.
+## Type‑State Builder Pattern
+
+One of the core design features is the type‑state builder pattern for creating an `OpenRouterClient`. This pattern enforces that required configuration steps (like setting the base URL and API key) are performed at compile time before making API calls. For example:
+
+- **Unconfigured State:**
+  The client is first created in an unconfigured state.
+
+- **NoAuth State:**
+  After setting the base URL (which ends with a trailing slash), the client transitions into a state that is not yet authenticated.
+
+- **Ready State:**
+  Once an API key is provided (and optional settings such as timeout, HTTP referer, and site title are set), the client transitions into the Ready state where HTTP resources (like the reqwest client) are fully built. Only then can API methods like `chat_completion` be invoked.
+
+The type definitions for the state markers (`Unconfigured`, `NoAuth`, and `Ready`) are simple empty structs that serve only as markers. They are defined in `src/client.rs` and re-exported from `src/lib.rs`.
+
+Below is an excerpt of the type‑state builder implementation for clarity:
 
 ```rust
-// src/client/mod.rs
-use std::marker::PhantomData;
+// src/client.rs (excerpt)
 
-// State markers
+use std::marker::PhantomData;
+use std::time::Duration;
+use url::Url;
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use crate::error::{Error, Result};
+use crate::types;
+
+#[derive(Debug, Clone)]
+pub struct ClientConfig {
+    pub api_key: Option<String>,
+    pub base_url: Url,
+    pub http_referer: Option<String>,
+    pub site_title: Option<String>,
+    pub timeout: Duration,
+}
+
+impl ClientConfig {
+    pub fn build_headers(&self) -> HeaderMap { /* ... */ }
+}
+
+// State markers.
 pub struct Unconfigured;
 pub struct NoAuth;
 pub struct Ready;
 
-/// Main OpenRouter client struct using type-state pattern
+/// Main OpenRouter client using type‑state validation.
 pub struct OpenRouterClient<State = Unconfigured> {
-    config: ClientConfig,
-    http_client: Option<reqwest::Client>,
-    _state: PhantomData<State>,
-}
-
-/// Configuration for the OpenRouter client
-#[derive(Debug, Clone)]
-pub struct ClientConfig {
-    api_key: Option<String>,
-    base_url: String,
-    http_referer: Option<String>,
-    site_title: Option<String>,
-    timeout: Option<Duration>,
-}
-
-impl Default for OpenRouterClient<Unconfigured> {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub config: ClientConfig,
+    pub http_client: Option<reqwest::Client>,
+    pub _state: PhantomData<State>,
 }
 
 impl OpenRouterClient<Unconfigured> {
-    /// Create a new unconfigured client builder
-    pub fn new() -> Self {
-        Self {
-            config: ClientConfig::default(),
-            http_client: None,
-            _state: PhantomData,
-        }
-    }
-
-    /// Configure base URL - transitions to NoAuth state
-    pub fn with_base_url(mut self, base_url: impl Into<String>) -> OpenRouterClient<NoAuth> {
-        self.config.base_url = base_url.into();
-        self.transition_to_no_auth()
-    }
-
-    fn transition_to_no_auth(self) -> OpenRouterClient<NoAuth> {
-        OpenRouterClient {
-            config: self.config,
-            http_client: self.http_client,
-            _state: PhantomData,
-        }
-    }
+    // new(), with_base_url(), and transitioning methods...
 }
 
 impl OpenRouterClient<NoAuth> {
-    /// Add authentication - transitions to Ready state
-    pub fn with_api_key(mut self, api_key: impl Into<String>) -> OpenRouterClient<Ready> {
-        self.config.api_key = Some(api_key.into());
-        self.transition_to_ready()
-    }
-
-    /// Optional configurations that don't change state
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.config.timeout = Some(timeout);
-        self
-    }
-
-    pub fn with_http_referer(mut self, referer: impl Into<String>) -> Self {
-        self.config.http_referer = Some(referer.into());
-        self
-    }
-
-    pub fn with_site_title(mut self, title: impl Into<String>) -> Self {
-        self.config.site_title = Some(title.into());
-        self
-    }
-
-    fn transition_to_ready(self) -> OpenRouterClient<Ready> {
-        let http_client = reqwest::Client::builder()
-            .timeout(self.config.timeout.unwrap_or(Duration::from_secs(30)))
-            .build()
-            .expect("Failed to create HTTP client");
-
-        OpenRouterClient {
-            config: self.config,
-            http_client: Some(http_client),
-            _state: PhantomData,
-        }
-    }
+    // with_api_key(), with_timeout(), etc. transitioning to Ready...
 }
 
 impl OpenRouterClient<Ready> {
-    /// Chat completion API
+    /// Access the chat API.
     pub fn chat(&self) -> chat::ChatApi {
         chat::ChatApi::new(self.http_client.clone().unwrap(), &self.config)
     }
-
-    /// Text completion API
-    pub fn completion(&self) -> completion::CompletionApi {
-        completion::CompletionApi::new(self.http_client.clone().unwrap(), &self.config)
-    }
-
-    /// Models API
-    pub fn models(&self) -> models::ModelsApi {
-        models::ModelsApi::new(self.http_client.clone().unwrap(), &self.config)
-    }
-
-    /// Credits API
-    pub fn credits(&self) -> credits::CreditsApi {
-        credits::CreditsApi::new(self.http_client.clone().unwrap(), &self.config)
-    }
-}
-
-// Usage example:
-//
-// let client = OpenRouterClient::new()
-//     .with_base_url("https://openrouter.ai/api/v1")
-//     .with_timeout(Duration::from_secs(60))
-//     .with_http_referer("https://my-app.com")
-//     .with_site_title("My App")
-//     .with_api_key("your-api-key");
-//
-// let chat_api = client.chat();
-// let completion_api = client.completion();
-```
-
-Then each API module would be structured like this:
-
-```rust
-// src/api/chat.rs
-pub struct ChatApi {
-    client: reqwest::Client,
-    config: ClientConfig,
-}
-
-impl ChatApi {
-    pub(crate) fn new(client: reqwest::Client, config: &ClientConfig) -> Self {
-        Self {
-            client,
-            config: config.clone(),
-        }
-    }
-
-    pub async fn create(
-        &self,
-        request: ChatCompletionRequest,
-    ) -> Result<ChatCompletionResponse, Error> {
-        // Implementation
-    }
-
-    pub async fn create_streaming(
-        &self,
-        request: ChatCompletionRequest,
-    ) -> Result<impl Stream<Item = Result<ChatCompletionChunk, Error>>, Error> {
-        // Implementation
-    }
+    // Other API modules: completion, models, credits...
 }
 ```
 
-Key benefits of this architecture:
+---
 
-1. **Type Safety**: The type-state pattern ensures that the client can't be used until properly configured
+## Implementation Roadmap
 
-2. **Builder Pattern**: Fluent interface for configuration with clear state transitions
+Since the project is under active development, here is the current and planned implementation plan:
 
-3. **Modular APIs**: Each API endpoint group is encapsulated in its own type
+### Phase 1: Core Functionality (In Progress / Completed)
+- [x] **Client Framework:**
+  - Implement type‑state builder pattern for configuration.
+  - Validate required fields at compile time.
+- [x] **Chat Completion Endpoint:**
+  - Implement `chat_completion` to call the OpenRouter chat completions API.
+  - Provide basic error handling and JSON decoding.
+- [x] **Core Data Models:**
+  - Define types for chat messages, requests, responses, and usage.
+  - Implement error types for consistent error handling.
 
-4. **Resource Management**: The HTTP client is created once and reused
+### Phase 2: Additional Endpoints and Advanced Features
+- [ ] **Streaming Support:**
+  - Implement a streaming API for chat completions.
+- [ ] **Text Completion Endpoint:**
+  - Build similar functionality for text completions.
+- [ ] **Models Listing and Credits:**
+  - Implement endpoints to list models and fetch credit details.
+- [ ] **Tool Calling & Structured Outputs:**
+  - Implement support for tool calls with JSON Schema validation.
+- [ ] **Provider Preferences & Routing:**
+  - Add support for options such as model fallbacks, routing preferences, and provider filtering.
 
-5. **Ergonomic Usage**: Simple and intuitive API for end users
+### Phase 3: Testing, Documentation, and CI
+- [ ] **Test Coverage:**
+  - Expand integration and unit tests.
+  - Implement mock tests for development using a mock server.
+- [ ] **Documentation:**
+  - Enhance inline documentation.
+  - Provide comprehensive examples in the `/examples` directory.
+- [ ] **Continuous Integration:**
+  - Set up CI pipelines for automated testing and linting.
 
-6. **Separation of Concerns**: Each API module handles its own requests/responses
+---
 
-This architecture ensures:
-- Compile-time configuration validation
-- Clear dependencies between configuration steps
-- Immutable client state after construction
-- Easy extension for new API endpoints
-- Consistent error handling across all operations
-- Efficient resource usage
+## Summary
 
-The client can be extended with additional features while maintaining the type-state guarantees and clean API design.
+The OpenRouter API Client Library is designed to be a robust, modular, and type‑safe interface for interacting with the OpenRouter API. Its architecture uses the type‑state builder pattern to enforce proper configuration and resource initialization, ensuring that only a fully configured client can be used to make API calls.
+
+This document provides an overview of the directory structure, design decisions, and our phased implementation plan. As the project evolves, additional endpoints and features will be introduced following this modular and test‑driven design.
+
+---
+
+Feel free to contribute or open issues if you have suggestions for improvement. Happy coding!
+
+-------------------------------------------------
