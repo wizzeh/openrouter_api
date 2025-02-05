@@ -4,6 +4,7 @@ pub mod completion;
 pub mod models;
 pub mod provider;
 pub mod transform;
+pub mod web_search;
 
 // Re-export common types
 pub use chat::*;

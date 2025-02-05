@@ -1,3 +1,4 @@
+//// File: openrouter_api/src/tests/integration_tests.rs
 /*
    src/tests/integration_tests.rs
 
@@ -9,6 +10,7 @@ mod integration_tests {
     use crate::client::{OpenRouterClient, Unconfigured};
     #[allow(unused_imports)]
     use crate::models::chat::{ChatMessage, ChatRole};
+    #[allow(unused_imports)]
     use crate::models::provider_preferences::{
         DataCollection, ProviderPreferences, ProviderSort, Quantization,
     };
@@ -191,14 +193,17 @@ mod integration_tests {
     #[tokio::test]
     async fn test_provider_preferences_serialization() -> Result<(), Box<dyn std::error::Error>> {
         // Build a provider preferences configuration.
-        let preferences = ProviderPreferences {
+        let preferences = crate::models::provider_preferences::ProviderPreferences {
             order: Some(vec!["OpenAI".to_string(), "Anthropic".to_string()]),
             allow_fallbacks: Some(false),
             require_parameters: Some(true),
-            data_collection: Some(DataCollection::Deny),
+            data_collection: Some(crate::models::provider_preferences::DataCollection::Deny),
             ignore: Some(vec!["Azure".to_string()]),
-            quantizations: Some(vec![Quantization::Fp8, Quantization::Int8]),
-            sort: Some(ProviderSort::Throughput),
+            quantizations: Some(vec![
+                crate::models::provider_preferences::Quantization::Fp8,
+                crate::models::provider_preferences::Quantization::Int8,
+            ]),
+            sort: Some(crate::models::provider_preferences::ProviderSort::Throughput),
         };
 
         // Start with an empty extra parameters object.
@@ -220,6 +225,35 @@ mod integration_tests {
         assert_eq!(provider_config.get("allowFallbacks").unwrap(), false);
         assert_eq!(provider_config.get("sort").unwrap(), "throughput");
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_web_search_response_deserialization() -> Result<(), Box<dyn std::error::Error>> {
+        // Simulated web search response JSON.
+        let simulated_response_json = r#"
+        {
+            "query": "rust programming",
+            "results": [
+                {
+                    "title": "The Rust Programming Language",
+                    "url": "https://www.rust-lang.org",
+                    "snippet": "Learn Rust programming."
+                },
+                {
+                    "title": "Rust by Example",
+                    "url": "https://doc.rust-lang.org/rust-by-example/",
+                    "snippet": "A collection of runnable examples."
+                }
+            ],
+            "total_results": 2
+        }
+        "#;
+        let response: crate::types::web_search::WebSearchResponse =
+            serde_json::from_str(simulated_response_json)?;
+        assert_eq!(response.query, "rust programming");
+        assert_eq!(response.total_results, 2);
+        assert_eq!(response.results.len(), 2);
         Ok(())
     }
 }

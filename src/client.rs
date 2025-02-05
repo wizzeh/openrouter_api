@@ -23,7 +23,8 @@ impl ClientConfig {
         if let Some(ref key) = self.api_key {
             headers.insert(
                 AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {}", key)).expect("Invalid API key header"),
+                HeaderValue::from_str(&format!("Bearer {}", key))
+                    .expect("Invalid API key header format"),
             );
         }
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -135,13 +136,17 @@ impl OpenRouterClient<Ready> {
     }
 
     /// Returns a new request builder for the completions endpoint.
-    /// Extra parameters are provided as a generic JSON object.
     pub fn completion_request(
         &self,
         messages: Vec<crate::types::chat::Message>,
     ) -> crate::api::request::RequestBuilder<serde_json::Value> {
         let extra_params = serde_json::json!({});
         crate::api::request::RequestBuilder::new("openai/gpt-4", messages, extra_params)
+    }
+
+    /// Provides access to the web search endpoint.
+    pub fn web_search(&self) -> crate::api::web_search::WebSearchApi {
+        crate::api::web_search::WebSearchApi::new(self.http_client.clone().unwrap(), &self.config)
     }
 
     /// Example chat completion method.
@@ -184,7 +189,6 @@ impl OpenRouterClient<Ready> {
         Ok(chat_response)
     }
 
-    /// Handles the response by deserializing JSON.
     async fn handle_response<T>(&self, response: reqwest::Response) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
@@ -212,8 +216,6 @@ impl OpenRouterClient<Ready> {
         })
     }
 
-    /// Validates any tool calls in a ChatCompletionResponse.
-    /// Each tool call must have its "kind" value equal to "function".
     pub fn validate_tool_calls(
         &self,
         response: &crate::types::chat::ChatCompletionResponse,

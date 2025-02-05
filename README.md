@@ -1,3 +1,4 @@
+------------------------------------------------
 # OpenRouter API Client Library
 
 OpenRouter API Client Library is a Rust client for interfacing with the OpenRouter API. The library is designed to be modular, type‑safe, and intuitive. It uses a type‑state builder pattern for configuring and validating the client at compile time, ensuring that all required configuration (such as setting the base URL and API key) happens before attempting a request.
@@ -13,6 +14,7 @@ OpenRouter API Client Library is a Rust client for interfacing with the OpenRout
 - **Structured Outputs:** Optionally request structured responses and enable JSON Schema validation using user‑provided schemas. This helps enforce consistent, type‑safe response formats.
 - **Tool Calling Capability:** Define function‑type tools that the model can invoke. The client supports multiple concurrent tool calls per response and validates that each tool call conforms to the expected format.
 - **Provider Preferences & Routing:** Configure model fallbacks, routing preferences, and provider filtering via a new strongly‑typed interface.
+- **Web Search Endpoint:** A new endpoint to perform web search queries. It accepts a minimal request structure (query and an optional number of results) and returns a structured set of search results.
 - **Future Roadmap:**
   - Streaming support for real‑time completions.
   - Text completion endpoint.
@@ -34,7 +36,89 @@ Ensure that you have Rust installed (tested with Rust v1.83.0) and that you're u
 
 ### Example Usage
 
-Below is a minimal example that creates a client, configures it with the API key, and sends a chat completion request with structured output enabled. You can also optionally pass tool calling instructions if you want the model to invoke external functions.
+Minimal Chat Example
+
+------------------------------------------------
+use openrouter_api::{OpenRouterClient, Ready, Result};
+use openrouter_api::types::chat::{ChatCompletionRequest, Message};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Ensure your API key is set in the environment.
+    let api_key = std::env::var("OPENROUTER_API_KEY")
+        .expect("OPENROUTER_API_KEY must be set");
+
+    // Build the client (Unconfigured -> NoAuth -> Ready).
+    let client = OpenRouterClient::new()
+        .with_base_url("https://openrouter.ai/api/v1/")?
+        .with_api_key(api_key);
+
+    // Create a minimal chat completion request.
+    let request = ChatCompletionRequest {
+        model: "openai/gpt-4o".to_string(),
+        messages: vec![Message {
+            role: "user".to_string(),
+            content: "Hello, world!".to_string(),
+            name: None,
+            tool_calls: None,
+        }],
+        stream: None,
+        response_format: None,
+        tools: None,
+        provider: None,
+        models: None,
+        transforms: None,
+    };
+
+    // Invoke the chat completion endpoint.
+    let response = client.chat_completion(request).await?;
+
+    // Output the model's response.
+    if let Some(choice) = response.choices.first() {
+        println!("Chat Response: {}", choice.message.content);
+    }
+    Ok(())
+}
+
+------------------------------------------------
+
+Below is a minimal example that demonstrates how to use the new Web Search endpoint.
+
+```rust
+use openrouter_api::{OpenRouterClient, Ready, Result};
+use openrouter_api::types::web_search::{WebSearchRequest, WebSearchResponse};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Ensure you have set your API key in the environment.
+    let api_key = std::env::var("OPENROUTER_API_KEY")
+        .expect("OPENROUTER_API_KEY must be set");
+
+    // Build the client (Unconfigured -> NoAuth -> Ready).
+    let client = OpenRouterClient::new()
+        .with_base_url("https://openrouter.ai/api/v1/")?
+        .with_api_key(api_key);
+
+    // Create a minimal web search request.
+    let request = WebSearchRequest {
+        query: "rust programming".into(),
+        num_results: Some(5),
+    };
+
+    // Invoke the web search endpoint.
+    let response: WebSearchResponse = client.web_search().search(request).await?;
+
+    // Print out the search results.
+    println!("Search query: {}", response.query);
+    for result in response.results {
+        println!("Title: {}\nURL: {}\n", result.title, result.url);
+    }
+
+    Ok(())
+}
+```
+
+Below is a more complete example that creates a client, configures it with the API key, sends a chat completion request with structured output enabled, and demonstrates tool calling capabilities:
 
 ```rust
 use openrouter_api::{
@@ -143,6 +227,8 @@ async fn main() -> Result<()> {
 }
 ```
 
+
+
 ### Running Tests
 
 Before running tests, set the environment variable `OPENROUTER_API_KEY` with your API key:
@@ -152,7 +238,7 @@ export OPENROUTER_API_KEY=sk-...
 cargo test
 ```
 
-This will run the integration tests in `tests/integration_tests.rs`, which now include scenarios for structured outputs, tool calling, and provider preferences.
+This will run the integration tests in `tests/integration_tests.rs`, which now include scenarios for structured outputs, tool calling, provider preferences, and the new web search endpoint.
 
 ## Implementation Plan
 
@@ -181,6 +267,9 @@ The project is under active development. The following roadmap outlines upcoming
   - Enable structured responses with JSON Schema validation and fallback behavior.
 - [x] **Provider Preferences & Model Routing:**
   - Enable configuration for provider preferences, fallbacks, and routing options.
+- [x] **Web Search Endpoint:**
+  - Implement a new endpoint for web search queries.
+  - Define strongly‑typed request and response models for search operations.
 
 ### Phase 3: Robust Testing & Documentation
 - [ ] **Unit & Integration Tests:**
@@ -207,6 +296,5 @@ For detailed logging during tests, you can run:
 ```bash
 cargo test -- --nocapture
 ```
-```
 
--------------------------------------------------
+------------------------------------------------
