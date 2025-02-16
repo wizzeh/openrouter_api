@@ -23,9 +23,8 @@ OpenRouter API Client Library is a Rust client for interfacing with the OpenRout
 
 Add the following to your project's `Cargo.toml`:
 
-```toml
-[dependencies]
-openrouter_api = { git = "https://github.com/yourusername/openrouter_api.git", branch = "main" }
+```bash
+cargo add openrouter_api
 ```
 
 Ensure that you have Rust installed (tested with Rust v1.83.0) and that you're using Cargo for building and testing.
