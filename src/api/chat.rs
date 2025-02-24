@@ -1,13 +1,12 @@
-/* src/api/chat.rs */
-
 use crate::client::ClientConfig;
 use crate::error::{Error, Result};
 use crate::types::chat::{ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse};
 use async_stream::try_stream;
 use futures::stream::Stream;
 use futures::StreamExt;
-use futures::TryStreamExt; // Required for map_err on bytes_stream.
+use futures::TryStreamExt;
 use reqwest::Client;
+use serde_json;
 use std::pin::Pin;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use tokio_util::io::StreamReader;
@@ -25,14 +24,64 @@ impl ChatApi {
         }
     }
 
+    /// Sends a chat completion request and returns a complete ChatCompletionResponse.
     pub async fn chat_completion(
         &self,
-        _request: ChatCompletionRequest,
+        request: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
-        // Implementation omitted for brevity.
-        unimplemented!()
+        // Build the complete URL for the chat completions endpoint.
+        let url = self
+            .config
+            .base_url
+            .join("chat/completions")
+            .map_err(|e| Error::ApiError {
+                code: 400,
+                message: format!("Invalid URL: {}", e),
+                metadata: None,
+            })?;
+
+        // Issue the POST request with appropriate headers and JSON body.
+        let response = self
+            .client
+            .post(url)
+            .headers(self.config.build_headers()?)
+            .json(&request)
+            .send()
+            .await?;
+
+        // Capture the HTTP status.
+        let status = response.status();
+
+        // Retrieve the response body.
+        let body = response.text().await?;
+
+        // Check if the HTTP response is successful.
+        if !status.is_success() {
+            return Err(Error::ApiError {
+                code: status.as_u16(),
+                message: body.clone(),
+                metadata: None,
+            });
+        }
+
+        if body.trim().is_empty() {
+            return Err(Error::ApiError {
+                code: status.as_u16(),
+                message: "Empty response body".into(),
+                metadata: None,
+            });
+        }
+
+        // Deserialize the JSON response into ChatCompletionResponse.
+        serde_json::from_str::<ChatCompletionResponse>(&body).map_err(|e| Error::ApiError {
+            code: status.as_u16(),
+            message: format!("Failed to decode JSON: {}. Body was: {}", e, body),
+            metadata: None,
+        })
     }
 
+    /// Returns a stream for a chat completion request.
+    /// Each yielded item is a ChatCompletionChunk.
     pub fn chat_completion_stream(
         &self,
         request: ChatCompletionRequest,
@@ -41,24 +90,22 @@ impl ChatApi {
         let config = self.config.clone();
 
         let stream = try_stream! {
-            // Build the complete URL for the chat completions endpoint.
+            // Build the URL for the chat completions endpoint.
             let url = config.base_url.join("chat/completions").map_err(|e| Error::ApiError {
                 code: 400,
                 message: format!("Invalid URL: {}", e),
                 metadata: None,
             })?;
 
-            // Serialize the request into a JSON value.
+            // Serialize the request with streaming enabled.
             let mut req_body = serde_json::to_value(&request).map_err(|e| Error::ApiError {
                 code: 500,
                 message: format!("Request serialization error: {}", e),
                 metadata: None,
             })?;
-            // Ensure streaming is enabled.
             req_body["stream"] = serde_json::Value::Bool(true);
 
-            // Issue the POST request with the appropriate headers and JSON body.
-            // Use error_for_status() to perform status checking without consuming the response twice.
+            // Issue the POST request with error-for-status checking.
             let response = client
                 .post(url)
                 .headers(config.build_headers()?)
@@ -67,7 +114,6 @@ impl ChatApi {
                 .await?
                 .error_for_status()
                 .map_err(|e| {
-                    // Map the reqwest error into our custom Error.
                     Error::ApiError {
                         code: e.status().map(|s| s.as_u16()).unwrap_or(500),
                         message: e.to_string(),
@@ -75,16 +121,12 @@ impl ChatApi {
                     }
                 })?;
 
-            // Convert the response bytes stream into an asynchronous line stream.
-            // At this point, the response is known to be successful.
-            let byte_stream = response.bytes_stream()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+            // Process the bytes stream as an asynchronous line stream.
+            let byte_stream = response.bytes_stream().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
             let stream_reader = StreamReader::new(byte_stream);
             let mut lines = FramedRead::new(stream_reader, LinesCodec::new());
 
-            // Process each SSE line.
             while let Some(line_result) = lines.next().await {
-                // Map any LinesCodec error into our API error.
                 let line = line_result.map_err(|e| Error::ApiError {
                     code: 500,
                     message: format!("LinesCodec error: {}", e),
@@ -103,7 +145,7 @@ impl ChatApi {
                         Err(_err) => continue,
                     }
                 } else if line.starts_with(":") {
-                    // SSE comment; ignore the line.
+                    // Ignore SSE comment lines.
                     continue;
                 }
             }
