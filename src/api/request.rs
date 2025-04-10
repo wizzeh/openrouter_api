@@ -149,22 +149,46 @@ impl RequestBuilder<Value> {
     /// Adds provider preferences into the request payload.
     ///
     /// This method accepts a strongly‑typed [ProviderPreferences] instance and serializes it
-    /// into the JSON payload under the "provider" key. It validates the preferences and panics
-    /// with a detailed error message if validation fails.
+    /// into the JSON payload under the "provider" key. It validates the preferences and returns
+    /// an error if validation fails.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Self)` if the preferences are valid, or an `Err` with a descriptive error
+    /// if validation fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use openrouter_api::api::request::RequestBuilder;
+    /// use openrouter_api::models::provider_preferences::ProviderPreferences;
+    /// use serde_json::json;
+    ///
+    /// let prefs = ProviderPreferences::new()
+    ///     .with_order(vec!["OpenAI".to_string(), "Anthropic".to_string()])
+    ///     .with_allow_fallbacks(true);
+    ///
+    /// let builder = RequestBuilder::new("openai/gpt-4o", vec![], json!({}))
+    ///     .with_provider_preferences(prefs)
+    ///     .expect("Valid provider preferences");
+    /// ```
     pub fn with_provider_preferences(
         mut self,
         preferences: crate::models::provider_preferences::ProviderPreferences,
-    ) -> Self {
-        if let Err(err) = preferences.validate() {
-            // Here we panic on validation error. Alternatively, the API could be changed
-            // to return a Result, but for consistency with the builder pattern we panic.
-            panic!("Invalid provider preferences: {}", err);
-        }
-        let provider_value =
-            serde_json::to_value(preferences).expect("Failed to serialize provider preferences");
+    ) -> Result<Self, crate::error::Error> {
+        // Validate the preferences
+        preferences.validate()?;
+        
+        // Serialize to JSON
+        let provider_value = serde_json::to_value(preferences)
+            .map_err(|e| crate::error::Error::SerializationError(e))?;
+            
+        // Add to the extra params
         if let Value::Object(ref mut map) = self.extra_params {
             map.insert("provider".to_string(), provider_value);
         }
-        self
+        
+        Ok(self)
     }
 }
+

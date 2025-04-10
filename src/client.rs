@@ -248,42 +248,59 @@ impl OpenRouterClient<Ready> {
         ))
     }
 
-    /// Returns a new request builder for chat completions that supports MCP.
-    pub fn chat_request_builder(
-        &self,
-        messages: Vec<crate::types::chat::Message>,
-    ) -> crate::api::request::RequestBuilder<serde_json::Value> {
-        // Apply the model coverage profile if available
-        let primary_model = if let Some(router_config) = &self.router_config {
-            match &router_config.profile {
-                PredefinedModelCoverageProfile::Custom(profile) => profile.primary.clone(),
-                PredefinedModelCoverageProfile::LowestLatency => "openai/gpt-3.5-turbo".to_string(),
-                PredefinedModelCoverageProfile::LowestCost => "openai/gpt-3.5-turbo".to_string(),
-                PredefinedModelCoverageProfile::HighestQuality => "anthropic/claude-3-opus-20240229".to_string(),
-            }
-        } else {
-            "openai/gpt-4o".to_string()
-        };
-        
-        // Set up basic params
-        let mut extra_params = serde_json::json!({});
-        
-        // Add provider preferences if set
-        if let Some(router_config) = &self.router_config {
-            if let Some(provider_prefs) = &router_config.provider_preferences {
-                extra_params["provider"] = serde_json::to_value(provider_prefs).unwrap_or_default();
-            }
-            
-            // Add fallback models if present in custom profile
-            if let PredefinedModelCoverageProfile::Custom(profile) = &router_config.profile {
-                if let Some(fallbacks) = &profile.fallbacks {
-                    extra_params["models"] = serde_json::to_value(fallbacks).unwrap_or_default();
+/// Returns a new request builder for chat completions that supports MCP.
+pub fn chat_request_builder(
+    &self,
+    messages: Vec<crate::types::chat::Message>,
+) -> crate::api::request::RequestBuilder<serde_json::Value> {
+    // Apply the model coverage profile if available
+    let primary_model = if let Some(router_config) = &self.router_config {
+        match &router_config.profile {
+            PredefinedModelCoverageProfile::Custom(profile) => profile.primary.clone(),
+            PredefinedModelCoverageProfile::LowestLatency => "openai/gpt-3.5-turbo".to_string(),
+            PredefinedModelCoverageProfile::LowestCost => "openai/gpt-3.5-turbo".to_string(),
+            PredefinedModelCoverageProfile::HighestQuality => "anthropic/claude-3-opus-20240229".to_string(),
+        }
+    } else {
+        "openai/gpt-4o".to_string()
+    };
+    
+    // Set up basic params
+    let mut extra_params = serde_json::json!({});
+    
+    // Add provider preferences if set
+    if let Some(router_config) = &self.router_config {
+        if let Some(provider_prefs) = &router_config.provider_preferences {
+            // Convert to Value and handle errors
+            match serde_json::to_value(provider_prefs) {
+                Ok(prefs_value) => {
+                    extra_params["provider"] = prefs_value;
+                },
+                Err(e) => {
+                    // Log error but continue without provider preferences
+                    eprintln!("Failed to serialize provider preferences: {}", e);
                 }
             }
         }
         
-        crate::api::request::RequestBuilder::new(primary_model, messages, extra_params)
+        // Add fallback models if present in custom profile
+        if let PredefinedModelCoverageProfile::Custom(profile) = &router_config.profile {
+            if let Some(fallbacks) = &profile.fallbacks {
+                match serde_json::to_value(fallbacks) {
+                    Ok(fallbacks_value) => {
+                        extra_params["models"] = fallbacks_value;
+                    },
+                    Err(e) => {
+                        // Log error but continue without fallbacks
+                        eprintln!("Failed to serialize fallback models: {}", e);
+                    }
+                }
+            }
+        }
     }
+    
+    crate::api::request::RequestBuilder::new(primary_model, messages, extra_params)
+}
 
     /// Helper method to handle standard HTTP responses.
     pub(crate) async fn handle_response<T>(&self, response: reqwest::Response) -> Result<T>

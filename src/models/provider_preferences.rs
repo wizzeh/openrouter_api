@@ -4,7 +4,7 @@
 //! users to configure routing options including provider ordering, fallback behavior,
 //! parameter requirements, data collection settings, quantizations and sorting.
 
-use crate::error::Error;
+// use crate::error::Error;
 use serde::{Deserialize, Serialize};
 
 /// Defines the data collection policy when selecting providers.
@@ -67,9 +67,29 @@ pub struct ProviderPreferences {
 impl ProviderPreferences {
     /// Validates the provider preferences.
     ///
-    /// For this phase, we simply return Ok(()) since our type‑safe enums guarantee valid values.
-    /// In the future, more complex inter‑field validations could be added here.
-    pub fn validate(&self) -> Result<(), Error> {
+    /// Performs validation checks to ensure the provider preferences are valid.
+    /// Returns an error with a descriptive message if any validation fails.
+    pub fn validate(&self) -> Result<(), crate::error::Error> {
+        // For now, we just have simple validation, but more could be added in the future
+        if let Some(ref order) = self.order {
+            if order.is_empty() {
+                return Err(crate::error::Error::ConfigError(
+                    "Provider order list cannot be empty".to_string()
+                ));
+            }
+            
+            // Check for duplicates
+            let mut seen = std::collections::HashSet::new();
+            for provider in order {
+                if !seen.insert(provider) {
+                    return Err(crate::error::Error::ConfigError(
+                        format!("Duplicate provider in order list: {}", provider)
+                    ));
+                }
+            }
+        }
+        
+        // Validation passed
         Ok(())
     }
 }
