@@ -1,6 +1,7 @@
 use crate::client::ClientConfig;
 use crate::error::{Error, Result};
 use crate::types::chat::{ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse};
+use crate::utils::validation;
 use async_stream::try_stream;
 use futures::stream::Stream;
 use futures::StreamExt;
@@ -8,6 +9,8 @@ use futures::TryStreamExt;
 use reqwest::Client;
 use serde_json;
 use std::pin::Pin;
+use std::time::Duration;
+use tokio::time::sleep;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use tokio_util::io::StreamReader;
 
@@ -29,6 +32,10 @@ impl ChatApi {
         &self,
         request: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
+        // Validate the request
+        validation::validate_chat_request(&request)?;
+        validation::check_token_limits(&request)?;
+        
         // Build the complete URL for the chat completions endpoint.
         let url = self
             .config
@@ -39,15 +46,52 @@ impl ChatApi {
                 message: format!("Invalid URL: {}", e),
                 metadata: None,
             })?;
-
-        // Issue the POST request with appropriate headers and JSON body.
-        let response = self
-            .client
-            .post(url)
-            .headers(self.config.build_headers()?)
-            .json(&request)
-            .send()
-            .await?;
+        
+        // Initialize retry counter and backoff duration
+        let mut retry_count = 0;
+        let mut backoff_ms = self.config.retry_config.initial_backoff_ms;
+        
+        let response = loop {
+            // Issue the POST request with appropriate headers and JSON body.
+            let response = self
+                .client
+                .post(url.clone())
+                .headers(self.config.build_headers()?)
+                .json(&request)
+                .send()
+                .await?;
+                
+            let status = response.status();
+            
+            // Check if we should retry based on status code
+            if self.config.retry_config.retry_on_status_codes.contains(&status.as_u16()) 
+               && retry_count < self.config.retry_config.max_retries {
+                // Increment retry counter and exponential backoff
+                retry_count += 1;
+                
+                // Log retry attempt
+                eprintln!(
+                    "Retrying request ({}/{}) after {} ms due to status code {}",
+                    retry_count,
+                    self.config.retry_config.max_retries,
+                    backoff_ms,
+                    status.as_u16()
+                );
+                
+                // Wait before retrying
+                sleep(Duration::from_millis(backoff_ms)).await;
+                
+                // Calculate next backoff with exponential increase
+                backoff_ms = std::cmp::min(
+                    backoff_ms * 2,
+                    self.config.retry_config.max_backoff_ms
+                );
+                
+                continue;
+            }
+            
+            break response;
+        };
 
         // Capture the HTTP status.
         let status = response.status();
@@ -73,11 +117,27 @@ impl ChatApi {
         }
 
         // Deserialize the JSON response into ChatCompletionResponse.
-        serde_json::from_str::<ChatCompletionResponse>(&body).map_err(|e| Error::ApiError {
+        let chat_response = serde_json::from_str::<ChatCompletionResponse>(&body).map_err(|e| Error::ApiError {
             code: status.as_u16(),
             message: format!("Failed to decode JSON: {}. Body was: {}", e, body),
             metadata: None,
-        })
+        })?;
+        
+        // Validate any tool calls in the response
+        for choice in &chat_response.choices {
+            if let Some(tool_calls) = &choice.message.tool_calls {
+                for tc in tool_calls {
+                    if tc.kind != "function" {
+                        return Err(Error::SchemaValidationError(format!(
+                            "Invalid tool call kind: {}. Expected 'function'",
+                            tc.kind
+                        )));
+                    }
+                }
+            }
+        }
+        
+        Ok(chat_response)
     }
 
     /// Returns a stream for a chat completion request.
@@ -88,6 +148,15 @@ impl ChatApi {
     ) -> Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk>> + Send>> {
         let client = self.client.clone();
         let config = self.config.clone();
+        
+        // Validate the request before streaming
+        if let Err(e) = validation::validate_chat_request(&request) {
+            return Box::pin(futures::stream::once(async { Err(e) }));
+        }
+        
+        if let Err(e) = validation::check_token_limits(&request) {
+            return Box::pin(futures::stream::once(async { Err(e) }));
+        }
 
         let stream = try_stream! {
             // Build the URL for the chat completions endpoint.
@@ -127,30 +196,71 @@ impl ChatApi {
             let mut lines = FramedRead::new(stream_reader, LinesCodec::new());
 
             while let Some(line_result) = lines.next().await {
-                let line = line_result.map_err(|e| Error::ApiError {
-                    code: 500,
-                    message: format!("LinesCodec error: {}", e),
-                    metadata: None,
-                })?;
+                let line = line_result.map_err(|e| Error::StreamingError(format!("Failed to read stream line: {}", e)))?;
+                
                 if line.trim().is_empty() {
                     continue;
                 }
+                
                 if line.starts_with("data:") {
                     let data_part = line.trim_start_matches("data:").trim();
                     if data_part == "[DONE]" {
                         break;
                     }
+                    
                     match serde_json::from_str::<ChatCompletionChunk>(data_part) {
                         Ok(chunk) => yield chunk,
-                        Err(_err) => continue,
+                        Err(e) => {
+                            // Log parsing error but continue processing stream
+                            eprintln!("Failed to parse chunk: {} - Data: {}", e, data_part);
+                            continue;
+                        }
                     }
                 } else if line.starts_with(":") {
                     // Ignore SSE comment lines.
                     continue;
+                } else {
+                    // Try to parse as a regular JSON message (non-SSE format)
+                    match serde_json::from_str::<ChatCompletionChunk>(&line) {
+                        Ok(chunk) => yield chunk,
+                        Err(_) => continue,
+                    }
                 }
             }
         };
 
         Box::pin(stream)
     }
+    
+    /// Simple function to complete a chat with a single user message
+    pub async fn simple_completion(&self, model: &str, user_message: &str) -> Result<String> {
+        let request = ChatCompletionRequest {
+            model: model.to_string(),
+            messages: vec![crate::types::chat::Message {
+                role: "user".to_string(),
+                content: user_message.to_string(),
+                name: None,
+                tool_calls: None,
+            }],
+            stream: None,
+            response_format: None,
+            tools: None,
+            provider: None,
+            models: None,
+            transforms: None,
+        };
+        
+        let response = self.chat_completion(request).await?;
+        
+        if response.choices.is_empty() {
+            return Err(Error::ApiError {
+                code: 500,
+                message: "No choices returned in response".into(),
+                metadata: None,
+            });
+        }
+        
+        Ok(response.choices[0].message.content.clone())
+    }
 }
+

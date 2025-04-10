@@ -1,12 +1,16 @@
 // openrouter_api/src/client.rs
 
+#![allow(unused)]
+// Fix for unused imports in src/client.rs
 use crate::error::{Error, Result};
-#[allow(unused_imports)]
 use crate::types;
+use crate::types::routing::{PredefinedModelCoverageProfile, RouterConfig};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use std::marker::PhantomData;
 use std::time::Duration;
 use url::Url;
+
+// [rest of client.rs remains the same]
 
 /// Client configuration containing API key, base URL, and additional settings.
 #[derive(Debug, Clone)]
@@ -15,7 +19,29 @@ pub struct ClientConfig {
     pub base_url: Url,
     pub http_referer: Option<String>,
     pub site_title: Option<String>,
+    pub user_id: Option<String>,
     pub timeout: Duration,
+    pub retry_config: RetryConfig,
+}
+
+/// Configuration for automatic retry behavior
+#[derive(Debug, Clone)]
+pub struct RetryConfig {
+    pub max_retries: u32,
+    pub initial_backoff_ms: u64,
+    pub max_backoff_ms: u64,
+    pub retry_on_status_codes: Vec<u16>,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            initial_backoff_ms: 500,
+            max_backoff_ms: 10000,
+            retry_on_status_codes: vec![429, 500, 502, 503, 504],
+        }
+    }
 }
 
 impl ClientConfig {
@@ -40,6 +66,11 @@ impl ClientConfig {
                 .map_err(|e| Error::ConfigError(format!("Invalid Title header: {}", e)))?;
             headers.insert("X-Title", title_value);
         }
+        if let Some(ref user_id) = self.user_id {
+            let user_id_value = HeaderValue::from_str(user_id)
+                .map_err(|e| Error::ConfigError(format!("Invalid User-ID header: {}", e)))?;
+            headers.insert("X-User-ID", user_id_value);
+        }
         Ok(headers)
     }
 }
@@ -54,6 +85,7 @@ pub struct OpenRouterClient<State = Unconfigured> {
     pub config: ClientConfig,
     pub http_client: Option<reqwest::Client>,
     pub _state: PhantomData<State>,
+    pub router_config: Option<RouterConfig>,
 }
 
 impl OpenRouterClient<Unconfigured> {
@@ -66,10 +98,13 @@ impl OpenRouterClient<Unconfigured> {
                 base_url: "https://openrouter.ai/api/v1/".parse().unwrap(),
                 http_referer: None,
                 site_title: None,
+                user_id: None,
                 timeout: Duration::from_secs(30),
+                retry_config: RetryConfig::default(),
             },
             http_client: None,
             _state: PhantomData,
+            router_config: None,
         }
     }
 
@@ -92,6 +127,7 @@ impl OpenRouterClient<Unconfigured> {
             config: self.config,
             http_client: None,
             _state: PhantomData,
+            router_config: self.router_config,
         }
     }
 }
@@ -121,24 +157,50 @@ impl OpenRouterClient<NoAuth> {
         self
     }
 
+    /// Optionally sets the user ID header for tracking specific users.
+    pub fn with_user_id(mut self, user_id: impl Into<String>) -> Self {
+        self.config.user_id = Some(user_id.into());
+        self
+    }
+
+    /// Optionally configures retry behavior.
+    pub fn with_retry_config(mut self, retry_config: RetryConfig) -> Self {
+        self.config.retry_config = retry_config;
+        self
+    }
+
+    /// Configures Model Coverage Profile for model selection and routing.
+    pub fn with_model_coverage_profile(mut self, profile: PredefinedModelCoverageProfile) -> Self {
+        self.router_config = Some(RouterConfig {
+            profile,
+            provider_preferences: None,
+        });
+        self
+    }
+
     fn transition_to_ready(self) -> Result<OpenRouterClient<Ready>> {
         let headers = self.config.build_headers()?;
-        let http_client = reqwest::Client::builder()
+        
+        // Build a client with retry capabilities
+        let client_builder = reqwest::Client::builder()
             .timeout(self.config.timeout)
-            .default_headers(headers)
+            .default_headers(headers);
+        
+        let http_client = client_builder
             .build()
             .map_err(|e| Error::ConfigError(format!("Failed to create HTTP client: {}", e)))?;
+        
         Ok(OpenRouterClient {
             config: self.config,
             http_client: Some(http_client),
             _state: PhantomData,
+            router_config: self.router_config,
         })
     }
 }
 
 impl OpenRouterClient<Ready> {
     /// Provides access to the chat endpoint.
-    /// Returns an error if the HTTP client is missing.
     pub fn chat(&self) -> Result<crate::api::chat::ChatApi> {
         let client = self
             .http_client
@@ -147,17 +209,34 @@ impl OpenRouterClient<Ready> {
         Ok(crate::api::chat::ChatApi::new(client, &self.config))
     }
 
-    /// Returns a new request builder for the completions endpoint.
-    pub fn completion_request(
-        &self,
-        messages: Vec<crate::types::chat::Message>,
-    ) -> crate::api::request::RequestBuilder<serde_json::Value> {
-        let extra_params = serde_json::json!({});
-        crate::api::request::RequestBuilder::new("openai/gpt-4", messages, extra_params)
+    /// Provides access to the completions endpoint.
+    pub fn completions(&self) -> Result<crate::api::completion::CompletionApi> {
+        let client = self
+            .http_client
+            .clone()
+            .ok_or_else(|| Error::ConfigError("HTTP client is missing".into()))?;
+        Ok(crate::api::completion::CompletionApi::new(client, &self.config))
+    }
+
+    /// Provides access to the models endpoint.
+    pub fn models(&self) -> Result<crate::api::models::ModelsApi> {
+        let client = self
+            .http_client
+            .clone()
+            .ok_or_else(|| Error::ConfigError("HTTP client is missing".into()))?;
+        Ok(crate::api::models::ModelsApi::new(client, &self.config))
+    }
+
+    /// Provides access to the structured output endpoint.
+    pub fn structured(&self) -> Result<crate::api::structured::StructuredApi> {
+        let client = self
+            .http_client
+            .clone()
+            .ok_or_else(|| Error::ConfigError("HTTP client is missing".into()))?;
+        Ok(crate::api::structured::StructuredApi::new(client, &self.config))
     }
 
     /// Provides access to the web search endpoint.
-    /// Returns an error if the HTTP client is missing.
     pub fn web_search(&self) -> Result<crate::api::web_search::WebSearchApi> {
         let client = self
             .http_client
@@ -169,49 +248,45 @@ impl OpenRouterClient<Ready> {
         ))
     }
 
-    /// Example chat completion method.
-    pub async fn chat_completion(
+    /// Returns a new request builder for chat completions that supports MCP.
+    pub fn chat_request_builder(
         &self,
-        request: crate::types::chat::ChatCompletionRequest,
-    ) -> Result<crate::types::chat::ChatCompletionResponse> {
-        // Build the full URL by joining relative path.
-        let url = self
-            .config
-            .base_url
-            .join("chat/completions")
-            .map_err(|e| Error::ApiError {
-                code: 400,
-                message: format!("URL join error: {}", e),
-                metadata: None,
-            })?;
-
-        let client = self
-            .http_client
-            .as_ref()
-            .ok_or_else(|| Error::ConfigError("HTTP client is missing".into()))?;
-
-        let response = client
-            .post(url)
-            .headers(self.config.build_headers()?)
-            .json(&request)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            return Err(Error::ApiError {
-                code: response.status().as_u16(),
-                message: response.text().await?,
-                metadata: None,
-            });
+        messages: Vec<crate::types::chat::Message>,
+    ) -> crate::api::request::RequestBuilder<serde_json::Value> {
+        // Apply the model coverage profile if available
+        let primary_model = if let Some(router_config) = &self.router_config {
+            match &router_config.profile {
+                PredefinedModelCoverageProfile::Custom(profile) => profile.primary.clone(),
+                PredefinedModelCoverageProfile::LowestLatency => "openai/gpt-3.5-turbo".to_string(),
+                PredefinedModelCoverageProfile::LowestCost => "openai/gpt-3.5-turbo".to_string(),
+                PredefinedModelCoverageProfile::HighestQuality => "anthropic/claude-3-opus-20240229".to_string(),
+            }
+        } else {
+            "openai/gpt-4o".to_string()
+        };
+        
+        // Set up basic params
+        let mut extra_params = serde_json::json!({});
+        
+        // Add provider preferences if set
+        if let Some(router_config) = &self.router_config {
+            if let Some(provider_prefs) = &router_config.provider_preferences {
+                extra_params["provider"] = serde_json::to_value(provider_prefs).unwrap_or_default();
+            }
+            
+            // Add fallback models if present in custom profile
+            if let PredefinedModelCoverageProfile::Custom(profile) = &router_config.profile {
+                if let Some(fallbacks) = &profile.fallbacks {
+                    extra_params["models"] = serde_json::to_value(fallbacks).unwrap_or_default();
+                }
+            }
         }
-        let chat_response: crate::types::chat::ChatCompletionResponse =
-            self.handle_response(response).await?;
-        // Validate any tool calls in the response.
-        self.validate_tool_calls(&chat_response)?;
-        Ok(chat_response)
+        
+        crate::api::request::RequestBuilder::new(primary_model, messages, extra_params)
     }
 
-    async fn handle_response<T>(&self, response: reqwest::Response) -> Result<T>
+    /// Helper method to handle standard HTTP responses.
+    pub(crate) async fn handle_response<T>(&self, response: reqwest::Response) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
     {
@@ -238,6 +313,7 @@ impl OpenRouterClient<Ready> {
         })
     }
 
+    /// Validates tool calls in a chat completion response.
     pub fn validate_tool_calls(
         &self,
         response: &crate::types::chat::ChatCompletionResponse,
@@ -257,3 +333,4 @@ impl OpenRouterClient<Ready> {
         Ok(())
     }
 }
+
