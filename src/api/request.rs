@@ -161,12 +161,18 @@ impl RequestBuilder<Value> {
     ///
     /// ```
     /// use openrouter_api::api::request::RequestBuilder;
-    /// use openrouter_api::models::provider_preferences::ProviderPreferences;
+    /// use openrouter_api::models::provider_preferences::{DataCollection, ProviderPreferences, ProviderSort};
     /// use serde_json::json;
     ///
-    /// let prefs = ProviderPreferences::new()
-    ///     .with_order(vec!["OpenAI".to_string(), "Anthropic".to_string()])
-    ///     .with_allow_fallbacks(true);
+    /// let prefs = ProviderPreferences {
+    ///     order: Some(vec!["OpenAI".to_string(), "Anthropic".to_string()]),
+    ///     allow_fallbacks: Some(true),
+    ///     require_parameters: None,
+    ///     data_collection: Some(DataCollection::Allow),
+    ///     ignore: None,
+    ///     quantizations: None,
+    ///     sort: Some(ProviderSort::Throughput),
+    /// };
     ///
     /// let builder = RequestBuilder::new("openai/gpt-4o", vec![], json!({}))
     ///     .with_provider_preferences(prefs)
@@ -178,17 +184,16 @@ impl RequestBuilder<Value> {
     ) -> Result<Self, crate::error::Error> {
         // Validate the preferences
         preferences.validate()?;
-        
+
         // Serialize to JSON
         let provider_value = serde_json::to_value(preferences)
             .map_err(|e| crate::error::Error::SerializationError(e))?;
-            
+
         // Add to the extra params
         if let Value::Object(ref mut map) = self.extra_params {
             map.insert("provider".to_string(), provider_value);
         }
-        
+
         Ok(self)
     }
 }
-

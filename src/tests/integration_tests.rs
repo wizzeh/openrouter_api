@@ -7,7 +7,7 @@
 
 #[cfg(test)]
 mod integration_tests {
-    use crate::client::{OpenRouterClient, Unconfigured};
+    use crate::client::{OpenRouterClient, RetryConfig, Unconfigured};
     #[allow(unused_imports)]
     use crate::models::chat::{ChatMessage, ChatRole};
     #[allow(unused_imports)]
@@ -122,10 +122,13 @@ mod integration_tests {
                 base_url: Url::parse("https://dummy/").unwrap(),
                 http_referer: None,
                 site_title: None,
+                user_id: None, // Add this field
                 timeout: std::time::Duration::from_secs(30),
+                retry_config: RetryConfig::default(), // Add this field
             },
             http_client: None,
             _state: std::marker::PhantomData,
+            router_config: None, // Add this field
         };
 
         // Validate the tool calls – should return Ok.
@@ -199,10 +202,13 @@ mod integration_tests {
                 base_url: Url::parse("https://dummy/").unwrap(),
                 http_referer: None,
                 site_title: None,
+                user_id: None, // Add this field
                 timeout: std::time::Duration::from_secs(30),
+                retry_config: RetryConfig::default(), // Add this field
             },
             http_client: None,
             _state: std::marker::PhantomData,
+            router_config: None, // Add this field
         };
 
         // Validate the tool calls – should return a SchemaValidationError.
@@ -220,43 +226,44 @@ mod integration_tests {
         Ok(())
     }
 
-#[tokio::test]
-async fn test_provider_preferences_serialization() -> Result<(), Box<dyn std::error::Error>> {
-    // Build a provider preferences configuration.
-    let preferences = crate::models::provider_preferences::ProviderPreferences {
-        order: Some(vec!["OpenAI".to_string(), "Anthropic".to_string()]),
-        allow_fallbacks: Some(false),
-        require_parameters: Some(true),
-        data_collection: Some(crate::models::provider_preferences::DataCollection::Deny),
-        ignore: Some(vec!["Azure".to_string()]),
-        quantizations: Some(vec![
-            crate::models::provider_preferences::Quantization::Fp8,
-            crate::models::provider_preferences::Quantization::Int8,
-        ]),
-        sort: Some(crate::models::provider_preferences::ProviderSort::Throughput),
-    };
+    #[tokio::test]
+    async fn test_provider_preferences_serialization() -> Result<(), Box<dyn std::error::Error>> {
+        // Build a provider preferences configuration.
+        let preferences = crate::models::provider_preferences::ProviderPreferences {
+            order: Some(vec!["OpenAI".to_string(), "Anthropic".to_string()]),
+            allow_fallbacks: Some(false),
+            require_parameters: Some(true),
+            data_collection: Some(crate::models::provider_preferences::DataCollection::Deny),
+            ignore: Some(vec!["Azure".to_string()]),
+            quantizations: Some(vec![
+                crate::models::provider_preferences::Quantization::Fp8,
+                crate::models::provider_preferences::Quantization::Int8,
+            ]),
+            sort: Some(crate::models::provider_preferences::ProviderSort::Throughput),
+        };
 
-    // Start with an empty extra parameters object.
-    let extra_params = json!({});
+        // Start with an empty extra parameters object.
+        let extra_params = json!({});
 
-    // Use the request builder to attach the provider preferences.
-    let builder = crate::api::request::RequestBuilder::new("openai/gpt-4o", vec![], extra_params)
-        .with_provider_preferences(preferences)
-        .expect("Provider preferences should be valid");
+        // Use the request builder to attach the provider preferences.
+        let builder =
+            crate::api::request::RequestBuilder::new("openai/gpt-4o", vec![], extra_params)
+                .with_provider_preferences(preferences)
+                .expect("Provider preferences should be valid");
 
-    // Serialize the complete payload.
-    let payload = builder.build();
-    let payload_json = serde_json::to_string_pretty(&payload)?;
-    println!("Payload with provider preferences:\n{}", payload_json);
+        // Serialize the complete payload.
+        let payload = builder.build();
+        let payload_json = serde_json::to_string_pretty(&payload)?;
+        println!("Payload with provider preferences:\n{}", payload_json);
 
-    // Check that the serialized JSON contains the "provider" key with the expected configuration.
-    let payload_value: Value = serde_json::from_str(&payload_json)?;
-    let provider_config = payload_value.get("provider").expect("provider key missing");
-    assert_eq!(provider_config.get("allowFallbacks").unwrap(), false);
-    assert_eq!(provider_config.get("sort").unwrap(), "throughput");
+        // Check that the serialized JSON contains the "provider" key with the expected configuration.
+        let payload_value: Value = serde_json::from_str(&payload_json)?;
+        let provider_config = payload_value.get("provider").expect("provider key missing");
+        assert_eq!(provider_config.get("allowFallbacks").unwrap(), false);
+        assert_eq!(provider_config.get("sort").unwrap(), "throughput");
 
-    Ok(())
-}
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_web_search_response_deserialization() -> Result<(), Box<dyn std::error::Error>> {

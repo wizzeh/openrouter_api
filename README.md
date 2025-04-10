@@ -1,8 +1,8 @@
+Here's the updated README.md that includes information about the Model Context Protocol (MCP) client implementation:
+
 # OpenRouter API Client Library
 
 OpenRouter API Client Library is a Rust client for interfacing with the OpenRouter API. The library is designed to be modular, type‑safe, and intuitive. It uses a type‑state builder pattern for configuring and validating the client at compile time, ensuring that all required configuration (such as setting the base URL and API key) happens before attempting a request.
-
-> **Note:** This project is still in development. Many features are planned but not yet fully implemented.
 
 ## Features
 
@@ -16,6 +16,7 @@ OpenRouter API Client Library is a Rust client for interfacing with the OpenRout
 - **Provider Preferences & Routing:** Configure model fallbacks, routing preferences, and provider filtering via a strongly‑typed interface.
 - **Web Search Endpoint:** Easily perform web search queries with type‑safe request and response models.
 - **Text Completion Endpoint:** Send a prompt (with a required `model` and `prompt` field) and receive generated text completions along with additional generation details. Extra parameters (e.g. temperature, top_p, etc.) can be provided as needed.
+- **Model Context Protocol (MCP) Client:** Implements a JSON-RPC client for the [Model Context Protocol](https://modelcontextprotocol.io/), enabling seamless integration with MCP servers for enhanced context and tool access.
 
 ## Getting Started
 
@@ -34,21 +35,20 @@ Ensure that you have Rust installed (tested with Rust v1.83.0) and that you're u
 #### Minimal Chat Example
 
 ```rust
-use openrouter_api::{OpenRouterClient, Ready, Result};
+use openrouter_api::{OpenRouterClient, utils, Result};
 use openrouter_api::types::chat::{ChatCompletionRequest, Message};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Ensure your API key is set in the environment.
-    let api_key = std::env::var("OPENROUTER_API_KEY")
-        .expect("OPENROUTER_API_KEY must be set");
+    // Load API key from environment variables
+    let api_key = utils::load_api_key_from_env()?;
 
-    // Build the client (Unconfigured -> NoAuth -> Ready).
+    // Build the client (Unconfigured -> NoAuth -> Ready)
     let client = OpenRouterClient::new()
         .with_base_url("https://openrouter.ai/api/v1/")?
         .with_api_key(api_key)?;
 
-    // Create a minimal chat completion request.
+    // Create a minimal chat completion request
     let request = ChatCompletionRequest {
         model: "openai/gpt-4o".to_string(),
         messages: vec![Message {
@@ -65,10 +65,11 @@ async fn main() -> Result<()> {
         transforms: None,
     };
 
-    // Invoke the chat completion endpoint.
-    let response = client.chat_completion(request).await?;
+    // Invoke the chat completion endpoint
+    let chat_api = client.chat()?;
+    let response = chat_api.chat_completion(request).await?;
 
-    // Output the model's response.
+    // Output the model's response
     if let Some(choice) = response.choices.first() {
         println!("Chat Response: {}", choice.message.content);
     }
@@ -76,39 +77,130 @@ async fn main() -> Result<()> {
 }
 ```
 
-#### Minimal Text Completion Example
+#### Provider Preferences Example
 
 ```rust
-use openrouter_api::{OpenRouterClient, Ready, Result};
-use openrouter_api::types::completion::{CompletionRequest, CompletionResponse};
+use openrouter_api::{OpenRouterClient, utils, Result};
+use openrouter_api::models::provider_preferences::{DataCollection, ProviderPreferences, ProviderSort};
+use openrouter_api::types::chat::{ChatCompletionRequest, Message};
 use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Ensure your API key is set in the environment.
-    let api_key = std::env::var("OPENROUTER_API_KEY")
-        .expect("OPENROUTER_API_KEY must be set");
+    // Load API key from environment variables
+    let api_key = utils::load_api_key_from_env()?;
 
-    // Build the client (Unconfigured -> NoAuth -> Ready).
+    // Build the client
+    let client = OpenRouterClient::new()
+        .with_base_url("https://openrouter.ai/api/v1/")?
+        .with_api_key(api_key)?;
+    
+    // Create provider preferences
+    let preferences = ProviderPreferences::new()
+        .with_order(vec!["OpenAI".to_string(), "Anthropic".to_string()])
+        .with_allow_fallbacks(true)
+        .with_data_collection(DataCollection::Deny)
+        .with_sort(ProviderSort::Throughput);
+    
+    // Create a request builder with provider preferences
+    let request_builder = client.chat_request_builder(vec![
+        Message {
+            role: "user".to_string(),
+            content: "Hello with provider preferences!".to_string(),
+            name: None,
+            tool_calls: None,
+        },
+    ]);
+    
+    // Add provider preferences and build the payload
+    let payload = request_builder
+        .with_provider_preferences(preferences)?
+        .build();
+    
+    // The payload now includes provider preferences!
+    println!("Request payload: {}", serde_json::to_string_pretty(&payload)?);
+    
+    Ok(())
+}
+```
+
+#### Model Context Protocol (MCP) Client Example
+
+```rust
+use openrouter_api::{MCPClient, Result};
+use openrouter_api::mcp_types::{
+    ClientCapabilities, GetResourceParams, ToolCallParams,
+    MCP_PROTOCOL_VERSION
+};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Create a new MCP client
+    let client = MCPClient::new("https://mcp-server.example.com/mcp")?;
+    
+    // Initialize the client with client capabilities
+    let server_capabilities = client.initialize(ClientCapabilities {
+        protocolVersion: MCP_PROTOCOL_VERSION.to_string(),
+        supportsSampling: Some(true),
+    }).await?;
+    
+    println!("Connected to MCP server with capabilities: {:?}", server_capabilities);
+    
+    // Get a resource from the MCP server
+    let resource = client.get_resource(GetResourceParams {
+        id: "document-123".to_string(),
+        parameters: None,
+    }).await?;
+    
+    println!("Retrieved resource: {}", resource.content);
+    
+    // Call a tool on the MCP server
+    let result = client.tool_call(ToolCallParams {
+        id: "search-tool".to_string(),
+        parameters: serde_json::json!({
+            "query": "Rust programming"
+        }),
+    }).await?;
+    
+    println!("Tool call result: {:?}", result.result);
+    
+    Ok(())
+}
+```
+
+#### Text Completion Example
+
+```rust
+use openrouter_api::{OpenRouterClient, utils, Result};
+use openrouter_api::types::completion::CompletionRequest;
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Load API key from environment
+    let api_key = utils::load_api_key_from_env()?;
+
+    // Build the client
     let client = OpenRouterClient::new()
         .with_base_url("https://openrouter.ai/api/v1/")?
         .with_api_key(api_key)?;
 
-    // Create a minimal text completion request.
+    // Create a text completion request
     let request = CompletionRequest {
-        model: "model".to_string(),
+        model: "openai/gpt-3.5-turbo-instruct".to_string(),
         prompt: "Once upon a time".to_string(),
-        // Additional generation parameters can be set here.
+        // Additional generation parameters
         extra_params: json!({
             "temperature": 0.8,
             "max_tokens": 50
         }),
     };
 
-    // Invoke the text completion endpoint.
-    let response: CompletionResponse = client.completions().text_completion(request).await?;
+    // Invoke the text completion endpoint
+    let completions_api = client.completions()?;
+    let response = completions_api.text_completion(request).await?;
 
-    // Print out the generated text from the first choice.
+    // Print out the generated text
     if let Some(choice) = response.choices.first() {
         println!("Text Completion: {}", choice.text);
     }
@@ -116,61 +208,25 @@ async fn main() -> Result<()> {
 }
 ```
 
-#### Minimal Web Search Example
-
-```rust
-use openrouter_api::{OpenRouterClient, Ready, Result};
-use openrouter_api::types::web_search::{WebSearchRequest, WebSearchResponse};
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Ensure your API key is set in the environment.
-    let api_key = std::env::var("OPENROUTER_API_KEY")
-        .expect("OPENROUTER_API_KEY must be set");
-
-    // Build the client (Unconfigured -> NoAuth -> Ready).
-    let client = OpenRouterClient::new()
-        .with_base_url("https://openrouter.ai/api/v1/")?
-        .with_api_key(api_key)?;
-
-    // Create a minimal web search request.
-    let request = WebSearchRequest {
-        query: "rust programming".into(),
-        num_results: Some(5),
-    };
-
-    // Invoke the web search endpoint.
-    let response: WebSearchResponse = client.web_search()?.search(request).await?;
-
-    // Print out the search results.
-    println!("Search query: {}", response.query);
-    for result in response.results {
-        println!("Title: {}\nURL: {}\n", result.title, result.url);
-    }
-
-    Ok(())
-}
-```
-
 #### Streaming Chat Example
 
 ```rust
-use openrouter_api::{OpenRouterClient, Ready, Result};
-use openrouter_api::types::chat::{ChatCompletionRequest, Message, ChatCompletionChunk};
+use openrouter_api::{OpenRouterClient, utils, Result};
+use openrouter_api::types::chat::{ChatCompletionRequest, Message};
 use futures::StreamExt;
+use std::io::Write;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Ensure your API key is set in the environment.
-    let api_key = std::env::var("OPENROUTER_API_KEY")
-        .expect("OPENROUTER_API_KEY must be set");
+    // Load API key from environment
+    let api_key = utils::load_api_key_from_env()?;
 
-    // Build the client.
+    // Build the client
     let client = OpenRouterClient::new()
         .with_base_url("https://openrouter.ai/api/v1/")?
         .with_api_key(api_key)?;
 
-    // Create a chat completion request with streaming enabled.
+    // Create a chat completion request with streaming enabled
     let request = ChatCompletionRequest {
         model: "openai/gpt-4o".to_string(),
         messages: vec![Message {
@@ -187,15 +243,19 @@ async fn main() -> Result<()> {
         transforms: None,
     };
 
-    // Invoke the streaming chat completion endpoint.
-    let mut stream = client.chat()?.chat_completion_stream(request);
+    // Invoke the streaming chat completion endpoint
+    let chat_api = client.chat()?;
+    let mut stream = chat_api.chat_completion_stream(request);
 
+    // Process the stream
     while let Some(chunk) = stream.next().await {
         match chunk {
             Ok(c) => {
-                // Incrementally output the content.
-                print!("{}", c.message.content);
-            }
+                if let Some(choice) = c.choices.first() {
+                    print!("{}", choice.message.content);
+                    std::io::stdout().flush().unwrap();
+                }
+            },
             Err(e) => eprintln!("Error during streaming: {}", e),
         }
     }
@@ -204,11 +264,43 @@ async fn main() -> Result<()> {
 }
 ```
 
+## Model Context Protocol (MCP) Client
+
+The library includes a client implementation for the [Model Context Protocol](https://modelcontextprotocol.io/), which is an open protocol that standardizes how applications provide context to LLMs.
+
+Key features of the MCP client include:
+
+- **JSON-RPC Communication:** Implements the JSON-RPC 2.0 protocol for MCP
+- **Resource Access:** Retrieve resources from MCP servers
+- **Tool Invocation:** Call tools provided by MCP servers
+- **Prompt Execution:** Execute prompts on MCP servers
+- **Server Capabilities:** Discover and leverage server capabilities
+- **Proper Authentication:** Handle initialization and authentication flows
+
+```rust
+// Create an MCP client connected to a server
+let client = MCPClient::new("https://mcp-server.example.com/mcp")?;
+
+// Initialize with client capabilities
+let server_capabilities = client.initialize(ClientCapabilities {
+    protocolVersion: "2025-03-26".to_string(),
+    supportsSampling: Some(true),
+}).await?;
+
+// Access resources from the server
+let resource = client.get_resource(GetResourceParams {
+    id: "some-resource-id".to_string(),
+    parameters: None,
+}).await?;
+```
+
+See the [Model Context Protocol specification](https://spec.modelcontextprotocol.io/specification/2025-03-26/) for more details.
+
 ## Implementation Plan
 
-The project is under active development. The roadmap outlines upcoming features and milestones:
+The project is actively developed with the following roadmap:
 
-### Phase 1: Core Functionality (Completed/In Progress)
+### Phase 1: Core Functionality (Completed)
 - [x] **Client Framework:**
   - Type‑state builder pattern for configuration with compile‑time validations.
   - Custom headers and robust error propagation.
@@ -217,7 +309,7 @@ The project is under active development. The roadmap outlines upcoming features 
 - [x] **Core Data Models:**
   - Definitions for chat messages, requests, responses, and usage.
 
-### Phase 2: Additional Endpoints and Features
+### Phase 2: Additional Endpoints and Features (Completed/In Progress)
 - [x] **Streaming Support:**
   - Streaming API for chat completions via Server‑Sent Events (SSE).
 - [x] **Web Search Endpoint:**
@@ -228,12 +320,14 @@ The project is under active development. The roadmap outlines upcoming features 
   - Support for invoking callable functions and validating structured responses via JSON Schema.
 - [x] **Provider Preferences & Routing:**
   - Configuration options for model fallbacks, routing, and provider filtering.
+- [x] **Model Context Protocol (MCP) Client:**
+  - Client implementation for the standardized MCP protocol.
 - [ ] **Models Listing and Credits:**
-    - Implement endpoints to list models and fetch credit details.
+  - Implement endpoints to list models and fetch credit details.
 
-### Phase 3: Robust Testing & Documentation
+### Phase 3: Robust Testing & Documentation (In Progress)
 - [ ] **Test Coverage:**
-  - Expand unit and integration tests, including streaming-specific tests.
+  - Expand unit and integration tests, including MCP and streaming-specific tests.
 - [ ] **Documentation Improvements:**
   - Enhance inline documentation, API docs, and usage examples in the `/examples` directory.
 - [ ] **Continuous Integration (CI):**
@@ -247,14 +341,13 @@ Contributions are welcome! Please open an issue or submit a pull request with yo
 
 Distributed under either the MIT license or the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
 
-
 ---
 
 # OpenRouter API Rust Crate Documentation
 
-_**Version:** 0.1.2 • **License:** MIT / Apache‑2.0_
+_**Version:** 0.1.3 • **License:** MIT / Apache‑2.0_
 
-The `openrouter_api` crate is a comprehensive client for interacting with the [OpenRouter API](https://openrouter.ai/docs). It provides strongly‑typed endpoints for chat completions, text completions, web search, and more. The crate is built using asynchronous Rust (with [reqwest](https://docs.rs/reqwest/) and [tokio](https://tokio.rs/)) and leverages advanced patterns such as type‑state and builder patterns for safe and flexible API usage.
+The `openrouter_api` crate is a comprehensive client for interacting with the [OpenRouter API](https://openrouter.ai/docs) and [Model Context Protocol](https://modelcontextprotocol.io/) servers. It provides strongly‑typed endpoints for chat completions, text completions, web search, and MCP connections. The crate is built using asynchronous Rust and leverages advanced patterns for safe and flexible API usage.
 
 ---
 
@@ -269,6 +362,7 @@ The `openrouter_api` crate is a comprehensive client for interacting with the [O
   - [Text Completions](#text-completions)
   - [Web Search](#web-search)
   - [Tool Calling & Structured Output](#tool-calling--structured-output)
+  - [Model Context Protocol](#model-context-protocol)
 - [Error Handling](#error-handling)
 - [Best Practices](#best-practices)
 - [Examples](#examples)
@@ -279,37 +373,19 @@ The `openrouter_api` crate is a comprehensive client for interacting with the [O
 ## Core Concepts
 
 - **Type‑State Client Configuration:**
-  The client is built using a type‑state pattern to ensure that required parameters (e.g. API key and base URL) are set before making any API calls. This pattern leverages Rust’s type system (with [`PhantomData`](https://doc.rust-lang.org/std/marker/struct.PhantomData.html)) to prevent misconfiguration at compile time.
+  The client is built using a type‑state pattern to ensure that required parameters are set before making any API calls.
 
-- **Flexible Request Building:**
-  The `RequestBuilder` lets you build rich API requests including optional provider preferences, structured output (using JSON Schema), and tool calling configurations.
+- **Provider Preferences:**
+  Strongly-typed configuration for model routing, fallbacks, and provider selection.
 
 - **Asynchronous Streaming:**
-  The chat API supports streaming responses via asynchronous streams. This is implemented using crates like [async-stream](https://docs.rs/async-stream/) and [tokio-util](https://docs.rs/tokio-util/).
+  Support for streaming responses via asynchronous streams.
 
-- **Error Handling & Schema Validation:**
-  A comprehensive custom error type wraps HTTP errors, API errors, configuration mistakes, and JSON Schema validation issues.
+- **Model Context Protocol:**
+  Client implementation for connecting to MCP servers to access resources, tools, and prompts.
 
-- **Tool Calling:**
-  Easily integrate with external functions using a structured representation of function calls. This enables the API to suggest or even invoke tools based on the conversation context.
-
----
-
-## Installation
-
-Add the following to your `Cargo.toml`:
-
-```toml
-[dependencies]
-openrouter_api = "0.1.2"
-reqwest = { version = "0.11", features = ["json", "stream"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-async-stream = "0.3"
-tokio-util = "0.7"
-thiserror = "1.0"
-```
+- **Error Handling & Validation:**
+  Comprehensive error handling with detailed context and validation utilities.
 
 ---
 
@@ -317,415 +393,157 @@ thiserror = "1.0"
 
 The crate is organized into several modules:
 
-- **`client`:**
-  Contains the client configuration and type‑state builder implementation. It ensures proper initialization before any API calls are made.
-
-- **`api`:**
-  Provides submodules for each API endpoint (chat, completion, web search, etc.). Each submodule includes detailed implementations for constructing requests and handling responses.
-
-- **`models`:**
-  Defines domain models for structured outputs, provider preferences, and tool calling.
-
-- **`types`:**
-  Contains type definitions for chat messages, completions, and web search responses.
-
-- **`error`:**
-  Centralized error types (wrapping reqwest errors, API errors, configuration issues, and schema validation problems).
-
-- **`tests`:**
-  Integration tests showcasing how to simulate and validate API responses.
+- **`client`:** Type-state client implementation with builder pattern
+- **`api`:** API endpoint implementations (chat, completions, web search, etc.)
+- **`models`:** Domain models for structured outputs, provider preferences, tools
+- **`types`:** Type definitions for requests and responses
+- **`mcp`:** Model Context Protocol client implementation
+- **`error`:** Centralized error handling
+- **`utils`:** Utility functions and helpers
 
 ---
 
 ## Client Setup & Type‑State Pattern
 
-The client configuration follows a three‑step type‑state builder pattern:
-
-1. **Unconfigured:**
-   The client is created in an unconfigured state using `OpenRouterClient::new()`.
-2. **NoAuth:**
-   The base URL is set (via `.with_base_url()`), transitioning the client into a state where authentication is not yet provided.
-3. **Ready:**
-   The API key is added (via `.with_api_key()`), and the client becomes fully configured for making API calls.
-
-### Example: Configuring the Client
-
 ```rust
-use openrouter_api::client::{OpenRouterClient, Unconfigured};
-use std::time::Duration;
-
-// Create an unconfigured client.
-let client = OpenRouterClient::<Unconfigured>::new();
-
-// Transition to a configured client (NoAuth state) by setting the base URL.
-let client = client
+// Create an unconfigured client
+let client = OpenRouterClient::new()
+    // Transition to NoAuth state by setting base URL
     .with_base_url("https://openrouter.ai/api/v1/")?
     .with_timeout(Duration::from_secs(30))
     .with_http_referer("https://your-app.com/")
-    .with_site_title("Your App Name");
-
-// Supply the API key to transition into the Ready state.
-let client = client.with_api_key(std::env::var("OPENROUTER_API_KEY")?)?;
+    // Transition to Ready state by setting API key
+    .with_api_key(std::env::var("OPENROUTER_API_KEY")?)?;
 ```
-
-> **Note:** The type‑state pattern prevents you from accidentally making API calls without proper configuration. Attempting to call an endpoint on a client that isn’t in the `Ready` state will result in a compile‑time error.
-
----
 
 ## API Endpoints
 
-The crate supports multiple endpoints, each with its own module and specialized request/response types.
-
 ### Chat Completions
 
-The chat API supports both single‑shot and streaming completions.
-
-#### Single‑Shot Chat Completion
-
 ```rust
-use openrouter_api::types::chat::Message;
-
-let messages = vec![Message {
-    role: "user".to_string(),
-    content: "Explain quantum computing".to_string(),
-    name: None,
-    tool_calls: None,
-}];
-
-// Issue a single chat completion call.
-let chat_api = client.chat()?;
-let response = chat_api.chat_completion(
-    openrouter_api::types::chat::ChatCompletionRequest {
-        model: "mistralai/mistral-small-latest".to_string(),
-        messages: messages.clone(),
-        stream: None,
-        response_format: None,
-        tools: None,
-        provider: None,
-        models: None,
-        transforms: None,
-    }
-).await?;
-
-println!("Assistant: {}", response.choices[0].message.content);
-```
-
-#### Streaming Chat Completion
-
-Streaming is useful for real‑time applications. The stream returns chunks as they become available.
-
-```rust
-use futures::StreamExt;
-
-let chat_api = client.chat()?;
-let mut stream = chat_api.chat_completion_stream(
-    openrouter_api::types::chat::ChatCompletionRequest {
-        model: "mistralai/mistral-small-latest".to_string(),
-        messages: messages.clone(),
-        stream: Some(true),
-        response_format: None,
-        tools: None,
-        provider: None,
-        models: None,
-        transforms: None,
-    }
-);
-
-while let Some(chunk) = stream.next().await {
-    match chunk {
-        Ok(c) => {
-            // Each chunk may include partial content updates.
-            if let Some(choice) = c.choices.first() {
-                // Print the delta (partial content) if available.
-                print!("{}", choice.message.content);
-            }
-        }
-        Err(e) => {
-            eprintln!("Stream error: {:?}", e);
-            break;
-        }
-    }
-}
-```
-
-### Text Completions
-
-For pure text completions, the `CompletionApi` is used.
-
-```rust
-use openrouter_api::types::completion::CompletionRequest;
-
-let request = CompletionRequest {
-    model: "openai/gpt-4".to_string(),
-    prompt: "Once upon a time".to_string(),
-    extra_params: serde_json::json!({ "temperature": 0.7 }),
-};
-
-let completion_api = openrouter_api::api::completion::CompletionApi::new(
-    client.http_client.clone().unwrap(),  // Clone the reqwest client
-    &client.config,
-);
-
-let response = completion_api.text_completion(request).await?;
-println!("Completed Text: {}", response.choices[0].text);
-```
-
-### Web Search
-
-The web search API allows you to perform simple search queries and receive structured results.
-
-```rust
-use openrouter_api::types::web_search::WebSearchRequest;
-
-let search_request = WebSearchRequest {
-    query: "rust programming".to_string(),
-    num_results: Some(5),
-};
-
-let web_search_api = client.web_search()?;
-let search_response = web_search_api.search(search_request).await?;
-
-println!("Query: {}", search_response.query);
-for result in search_response.results {
-    println!("Title: {} • URL: {}", result.title, result.url);
-}
-```
-
-### Tool Calling & Structured Output
-
-#### Enabling Structured Output
-
-Structured output allows you to validate the model’s response against a JSON Schema. This is configured via the `RequestBuilder`.
-
-```rust
-use openrouter_api::models::structured::JsonSchemaConfig;
-use openrouter_api::api::request::RequestBuilder;
-
-let schema_config = JsonSchemaConfig {
-    name: "Person".to_string(),
-    strict: true,
-    schema: serde_json::json!({
-        "type": "object",
-        "properties": {
-            "name": { "type": "string" },
-            "age": { "type": "integer" }
-        },
-        "required": ["name", "age"]
-    }),
-};
-
-let request_payload = RequestBuilder::new("mistralai/mistral-small-latest", messages.clone(), serde_json::json!({}))
-    .with_structured_output(schema_config, true, true)  // validate & fallback options
-    .build();
-```
-
-#### Configuring Tool Calling
-
-Tool calling lets you define external functions that the model can suggest invoking. This is useful for integrating live functions (e.g., fetching weather).
-
-```rust
-use openrouter_api::models::tool::{Tool, FunctionDescription};
-
-let get_weather = FunctionDescription {
-    name: "get_weather".to_string(),
-    description: Some("Get weather information for a location".to_string()),
-    parameters: serde_json::json!({
-        "type": "object",
-        "properties": {
-            "location": {
-                "type": "string",
-                "description": "City and state (e.g., 'San Francisco, CA')"
-            },
-            "unit": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"]
-            }
-        },
-        "required": ["location"]
-    }),
-};
-
-let request_payload = RequestBuilder::new("meta-llama/llama-3-70b-instruct", messages.clone(), serde_json::json!({}))
-    .build();
-
-// Call the chat endpoint with tool information.
+// Basic chat completion
 let response = client.chat()?.chat_completion(
-    openrouter_api::types::chat::ChatCompletionRequest {
-        model: "meta-llama/llama-3-70b-instruct".to_string(),
-        messages,
+    ChatCompletionRequest {
+        model: "openai/gpt-4o".to_string(),
+        messages: vec![Message {
+            role: "user".to_string(),
+            content: "Explain quantum computing".to_string(),
+            name: None,
+            tool_calls: None,
+        }],
         stream: None,
         response_format: None,
-        tools: Some(vec![Tool::Function { function: get_weather }]),
+        tools: None,
         provider: None,
         models: None,
         transforms: None,
     }
 ).await?;
-
-// Process the tool call response.
-if let Some(choice) = response.choices.first() {
-    if let Some(tool_calls) = &choice.message.tool_calls {
-        for call in tool_calls {
-            if call.kind == "function" {
-                println!("Tool call detected for function: {}", call.function_call.name);
-                println!("Arguments: {}", call.function_call.arguments);
-                // Here, you would implement your logic to execute the tool and return the result.
-            }
-        }
-    }
-}
 ```
 
----
+### Tool Calling
+
+```rust
+// Define a function tool
+let weather_tool = Tool::Function { 
+    function: FunctionDescription {
+        name: "get_weather".to_string(),
+        description: Some("Get weather information for a location".to_string()),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "City and state"
+                }
+            },
+            "required": ["location"]
+        }),
+    }
+};
+
+// Make a request with tool calling enabled
+let response = client.chat()?.chat_completion(
+    ChatCompletionRequest {
+        model: "openai/gpt-4o".to_string(),
+        messages: vec![Message {
+            role: "user".to_string(),
+            content: "What's the weather in Boston?".to_string(),
+            name: None,
+            tool_calls: None,
+        }],
+        tools: Some(vec![weather_tool]),
+        // other fields...
+        stream: None,
+        response_format: None,
+        provider: None,
+        models: None,
+        transforms: None,
+    }
+).await?;
+```
+
+### Model Context Protocol
+
+```rust
+// Create an MCP client
+let mcp_client = MCPClient::new("https://mcp-server.example.com/mcp")?;
+
+// Initialize with client capabilities
+let server_capabilities = mcp_client.initialize(ClientCapabilities {
+    protocolVersion: MCP_PROTOCOL_VERSION.to_string(),
+    supportsSampling: Some(true),
+}).await?;
+
+// Access a resource from the MCP server
+let resource = mcp_client.get_resource(GetResourceParams {
+    id: "document-123".to_string(),
+    parameters: None,
+}).await?;
+```
 
 ## Error Handling
 
-The crate defines a central [`Error`](#error-handling) enum that wraps different error kinds:
-
-- **HTTP Errors:**
-  Errors coming from the reqwest library.
-
-- **API Errors:**
-  Errors returned from the OpenRouter API (with status codes and error messages).
-
-- **Configuration Errors:**
-  Issues with client setup (e.g., invalid API key or headers).
-
-- **Schema Validation Errors:**
-  When a response fails JSON Schema validation for structured output.
-
-### Example Error Handling
-
 ```rust
-match client.chat()?.chat_completion(
-    openrouter_api::types::chat::ChatCompletionRequest {
-        model: "openai/gpt-4".to_string(),
-        messages: messages.clone(),
-        stream: None,
-        response_format: None,
-        tools: None,
-        provider: None,
-        models: None,
-        transforms: None,
-    }
-).await {
+match client.chat()?.chat_completion(request).await {
     Ok(response) => {
-        println!("Chat completion succeeded: {:?}", response);
+        println!("Success: {}", response.choices[0].message.content);
     },
     Err(e) => match e {
-        openrouter_api::error::Error::ApiError { code, message, .. } => {
+        Error::ApiError { code, message, .. } => {
             eprintln!("API Error ({}): {}", code, message);
         },
-        openrouter_api::error::Error::HttpError(ref err) if err.is_timeout() => {
+        Error::HttpError(ref err) if err.is_timeout() => {
             eprintln!("Request timed out!");
         },
-        _ => eprintln!("Unexpected error: {:?}", e),
-    },
+        Error::ConfigError(msg) => {
+            eprintln!("Configuration error: {}", msg);
+        },
+        _ => eprintln!("Other error: {:?}", e),
+    }
 }
 ```
-
----
 
 ## Best Practices
 
 1. **Use the Type‑State Pattern:**
-   Always configure your client fully (base URL, API key, headers) before issuing requests. The type‑state pattern will help catch misconfiguration at compile time.
+   Let the compiler ensure your client is properly configured.
 
 2. **Set Appropriate Timeouts & Headers:**
-   Leverage `with_timeout`, `with_http_referer`, and `with_site_title` to ensure your requests are traceable and robust.
+   Configure reasonable timeouts and identify your application.
 
-3. **Validate Structured Responses:**
-   When using structured output, configure JSON Schema validation to catch unexpected responses early.
+3. **Handle Errors Appropriately:**
+   Implement proper error handling for each error type.
 
-4. **Stream Responsibly:**
-   When using streaming endpoints, ensure you handle errors gracefully and close streams when finished.
+4. **Use Provider Preferences:**
+   Configure provider routing for optimal model selection.
 
 5. **Secure Your API Keys:**
-   Store sensitive API keys in environment variables or secure storage rather than hardcoding them.
-
----
-
-## Examples
-
-### Full Client Initialization & Chat Request
-
-Below is a complete example combining client initialization, a chat request, and error handling:
-
-```rust
-use openrouter_api::client::{OpenRouterClient, Unconfigured};
-use openrouter_api::types::chat::{Message, ChatCompletionRequest};
-use std::time::Duration;
-use tokio;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize client (Unconfigured -> NoAuth -> Ready)
-    let client = OpenRouterClient::<Unconfigured>::new()
-        .with_base_url("https://openrouter.ai/api/v1/")?
-        .with_timeout(Duration::from_secs(30))
-        .with_http_referer("https://your-app.com/")
-        .with_site_title("Example App")
-        .with_api_key(std::env::var("OPENROUTER_API_KEY")?)?;
-
-    // Prepare chat messages.
-    let messages = vec![
-        Message {
-            role: "user".to_string(),
-            content: "What is a phantom type in Rust?".to_string(),
-            name: None,
-            tool_calls: None,
-        }
-    ];
-
-    // Build the chat completion request.
-    let request = ChatCompletionRequest {
-        model: "openai/gpt-4".to_string(),
-        messages,
-        stream: None,
-        response_format: None,
-        tools: None,
-        provider: None,
-        models: None,
-        transforms: None,
-    };
-
-    // Execute the chat completion.
-    let chat_api = client.chat()?;
-    match chat_api.chat_completion(request).await {
-        Ok(response) => {
-            println!("Assistant says: {}", response.choices[0].message.content);
-        },
-        Err(err) => {
-            eprintln!("Error: {:?}", err);
-        }
-    }
-
-    Ok(())
-}
-```
-
-### Provider Preferences with Request Builder
-
-```rust
-use openrouter_api::api::request::RequestBuilder;
-use serde_json::json;
-
-let provider_preferences = json!({
-    "order": ["openrouter"],
-    "allowFallbacks": true
-});
-
-let request_payload = RequestBuilder::new("openai/gpt-4", messages.clone(), json!({}))
-    .with_provider_preferences(provider_preferences, true, true)
-    .build();
-
-println!("Payload: {}", serde_json::to_string_pretty(&request_payload)?);
-```
-
----
+   Store keys in environment variables or secure storage.
 
 ## Additional Resources
 
 - [OpenRouter API Documentation](https://openrouter.ai/docs)
+- [Model Context Protocol Specification](https://modelcontextprotocol.io/specification/2025-03-26/)
 
 ---

@@ -1,126 +1,195 @@
-// src/mcp/client.rs
-use crate::error::Result;
-use crate::types::chat::Message;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+//! MCP client implementation for connecting to MCP servers.
 
-/// Model Context Protocol client for managing context windows
-/// and efficient token usage across conversations.
+use tokio::sync::Mutex;
+use url::Url;
+
+use crate::error::{Error, Result};
+use crate::mcp::types::*;
+
+/// MCP client for connecting to and interacting with MCP servers.
 pub struct MCPClient {
-    /// Maximum context window size for the model
-    max_context_size: usize,
-    /// Strategy to use for context management
-    strategy: Box<dyn ContextStrategy>,
-    /// Context processor for complex operations
-    processor: Option<Arc<dyn ContextProcessor>>,
-}
-
-/// Strategy for managing context to fit within token limits
-pub trait ContextStrategy: Send + Sync {
-    /// Fit messages within context window
-    fn fit_to_context(&self, messages: Vec<Message>, max_tokens: usize) -> Result<Vec<Message>>;
-    
-    /// Compress messages to reduce token usage
-    fn compress(&self, messages: Vec<Message>) -> Result<Vec<Message>>;
-    
-    /// Estimate token count for a set of messages or message subsets
-    /// Default implementation uses a simple heuristic of 4 chars per token
-    fn estimate_token_count(&self, messages: &[Message]) -> usize {
-        messages.iter().map(|msg| {
-            // Roughly 4 chars per token as a basic estimation
-            (msg.content.len() / 4) + 5 // Add overhead for role, etc.
-        }).sum()
-    }
-}
-
-/// Advanced context processor interface
-pub trait ContextProcessor: Send + Sync {
-    /// Compress context using advanced techniques
-    fn compress(&self, messages: Vec<Message>) -> Result<Vec<Message>>;
-    
-    /// Summarize previous context
-    fn summarize(&self, messages: Vec<Message>) -> Result<Message>;
-    
-    /// Extract key information from context
-    fn extract_key_info(&self, messages: Vec<Message>) -> Result<Vec<String>>;
+    /// The HTTP client for making requests
+    client: reqwest::Client,
+    /// The base URL of the MCP server
+    server_url: Url,
+    /// Server capabilities once initialized
+    capabilities: Mutex<Option<ServerCapabilities>>,
 }
 
 impl MCPClient {
-    /// Create a new MCP client with specified context size and strategy
-    pub fn new(max_context_size: usize, strategy: Box<dyn ContextStrategy>) -> Self {
-        Self {
-            max_context_size,
-            strategy,
-            processor: None,
-        }
-    }
-    
-    /// Set a context processor for advanced operations
-    pub fn with_processor(mut self, processor: Arc<dyn ContextProcessor>) -> Self {
-        self.processor = Some(processor);
-        self
-    }
-    
-    /// Process messages to fit within context window
-    pub fn process_context(&self, messages: &[Message]) -> Result<Vec<Message>> {
-        let estimated_tokens = self.strategy.estimate_token_count(messages);
-        
-        if estimated_tokens <= self.max_context_size {
-            return Ok(messages.to_vec());
-        }
-        
-        // Apply the selected strategy to fit the context
-        self.strategy.fit_to_context(messages.to_vec(), self.max_context_size)
-    }
-    
-    /// Compress context using available processor
-    pub fn compress_context(&self, messages: Vec<Message>) -> Result<Vec<Message>> {
-        if let Some(processor) = &self.processor {
-            processor.compress(messages)
-        } else {
-            // Default simple compression if no processor is available
-            self.strategy.compress(messages)
-        }
-    }
-    
-    /// Manage a multi-part conversation that exceeds context limits
-    pub async fn manage_conversation<F, Fut>(&self, 
-        messages: Vec<Message>, 
-        processor: F
-    ) -> Result<ConversationResult> 
-    where
-        F: FnOnce(Vec<Message>) -> Fut,
-        Fut: std::future::Future<Output = Result<Vec<Message>>>
-    {
-        // Store the original message length for comparison
-        let original_len = messages.len();
-        
-        // Process the context to fit within limits
-        let processed_messages = self.process_context(&messages)?;
-        
-        // Process the conversation with the provided function
-        let response_messages = processor(processed_messages.clone()).await?;
-        
-        // Get the token count before moving response_messages
-        let token_count = self.strategy.estimate_token_count(&response_messages);
-        
-        // Return the result with metadata
-        Ok(ConversationResult {
-            messages: response_messages,
-            compressed: processed_messages.len() < original_len,
-            token_count,
+    /// Create a new MCP client for the given server URL.
+    pub fn new(server_url: impl AsRef<str>) -> Result<Self> {
+        let server_url = Url::parse(server_url.as_ref())
+            .map_err(|e| Error::ConfigError(format!("Invalid server URL: {}", e)))?;
+            
+        Ok(Self {
+            client: reqwest::Client::new(),
+            server_url,
+            capabilities: Mutex::new(None),
         })
     }
-}
-
-/// Result of a managed conversation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConversationResult {
-    /// The resulting messages after processing
-    pub messages: Vec<Message>,
-    /// Whether the context was compressed
-    pub compressed: bool,
-    /// Estimated token count of the result
-    pub token_count: usize,
+    
+    /// Generate a simple request ID
+    fn generate_id() -> String {
+        // Use a simple timestamp-based ID instead of UUID
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        format!("req-{}", timestamp)
+    }
+    
+    /// Initialize the connection to the MCP server.
+    pub async fn initialize(&self, client_capabilities: ClientCapabilities) -> Result<ServerCapabilities> {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Self::generate_id(),
+            method: "initialize".to_string(),
+            params: Some(serde_json::to_value(InitializeParams {
+                capabilities: client_capabilities,
+            }).map_err(|e| Error::SerializationError(e))?),
+        };
+        
+        let response = self.send_request(request).await?;
+        let capabilities = self.parse_response::<ServerCapabilities>(response)?;
+        
+        // Store the server capabilities
+        let mut caps = self.capabilities.lock().await;
+        *caps = Some(capabilities.clone());
+        
+        Ok(capabilities)
+    }
+    
+    /// Get a resource from the server.
+    pub async fn get_resource(&self, params: GetResourceParams) -> Result<ResourceResponse> {
+        // Check if initialized
+        self.ensure_initialized().await?;
+        
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Self::generate_id(),
+            method: "getResource".to_string(),
+            params: Some(serde_json::to_value(params).map_err(|e| Error::SerializationError(e))?),
+        };
+        
+        let response = self.send_request(request).await?;
+        self.parse_response::<ResourceResponse>(response)
+    }
+    
+    /// Call a tool on the server.
+    pub async fn tool_call(&self, params: ToolCallParams) -> Result<ToolCallResponse> {
+        // Check if initialized
+        self.ensure_initialized().await?;
+        
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Self::generate_id(),
+            method: "toolCall".to_string(),
+            params: Some(serde_json::to_value(params).map_err(|e| Error::SerializationError(e))?),
+        };
+        
+        let response = self.send_request(request).await?;
+        self.parse_response::<ToolCallResponse>(response)
+    }
+    
+    /// Execute a prompt on the server.
+    pub async fn execute_prompt(&self, params: ExecutePromptParams) -> Result<ExecutePromptResponse> {
+        // Check if initialized
+        self.ensure_initialized().await?;
+        
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Self::generate_id(),
+            method: "executePrompt".to_string(),
+            params: Some(serde_json::to_value(params).map_err(|e| Error::SerializationError(e))?),
+        };
+        
+        let response = self.send_request(request).await?;
+        self.parse_response::<ExecutePromptResponse>(response)
+    }
+    
+    /// Send a sampling response to the server.
+    pub async fn respond_to_sampling(&self, id: String, result: SamplingResponse) -> Result<()> {
+        // Check if initialized
+        self.ensure_initialized().await?;
+        
+        let response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: Some(serde_json::to_value(result).map_err(|e| Error::SerializationError(e))?),
+            error: None,
+        };
+        
+        self.send_response(response).await
+    }
+    
+    /// Get the server capabilities.
+    pub async fn capabilities(&self) -> Option<ServerCapabilities> {
+        self.capabilities.lock().await.clone()
+    }
+    
+    /// Send a JSON-RPC request to the server.
+    async fn send_request(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse> {
+        let response = self.client
+            .post(self.server_url.clone())
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| Error::HttpError(e))?;
+        
+        if !response.status().is_success() {
+            return Err(Error::ApiError {
+                code: response.status().as_u16(),
+                message: response.text().await.unwrap_or_default(),
+                metadata: None,
+            });
+        }
+        
+        let response_body = response.text().await.map_err(|e| Error::HttpError(e))?;
+        let response: JsonRpcResponse = serde_json::from_str(&response_body)
+            .map_err(|e| Error::SerializationError(e))?;
+        
+        Ok(response)
+    }
+    
+    /// Send a JSON-RPC response to the server.
+    async fn send_response(&self, response: JsonRpcResponse) -> Result<()> {
+        let _response = self.client
+            .post(self.server_url.clone())
+            .json(&response)
+            .send()
+            .await
+            .map_err(|e| Error::HttpError(e))?;
+        
+        Ok(())
+    }
+    
+    /// Parse a JSON-RPC response into the expected type.
+    fn parse_response<T: serde::de::DeserializeOwned>(&self, response: JsonRpcResponse) -> Result<T> {
+        // Check for errors
+        if let Some(error) = response.error {
+            return Err(Error::ApiError {
+                code: error.code as u16,
+                message: error.message,
+                metadata: error.data,
+            });
+        }
+        
+        // Parse the result
+        match response.result {
+            Some(result) => serde_json::from_value(result)
+                .map_err(|e| Error::SerializationError(e)),
+            None => Err(Error::ConfigError("Response contains no result".into())),
+        }
+    }
+    
+    /// Ensure the client has been initialized.
+    async fn ensure_initialized(&self) -> Result<()> {
+        if self.capabilities.lock().await.is_none() {
+            return Err(Error::ConfigError("MCP client not initialized".into()));
+        }
+        Ok(())
+    }
 }
 
