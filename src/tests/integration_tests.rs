@@ -49,6 +49,7 @@ mod integration_tests {
                 content: "What is a phantom type in Rust?".to_string(),
                 name: None,
                 tool_calls: None,
+                tool_call_id: None,
             }],
             stream: None,
             response_format: None,
